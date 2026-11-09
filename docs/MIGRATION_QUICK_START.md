@@ -1,154 +1,103 @@
-# Quick Start: Controlled Migration from Alertmanager
+# Quick Start: Migrating from Alertmanager
 
-**Target Audience**: Ops/SRE evaluating a controlled replacement slice
-**Time Required**: Environment-dependent
-**Difficulty**: Easy
+AMP's alerting core is upstream Alertmanager v0.34.1 ([ALERTMANAGER_COMPATIBILITY.md](ALERTMANAGER_COMPATIBILITY.md)), so moving from Alertmanager means moving your `alertmanager.yml` and silences, not rewriting them. For a staged move of live traffic, see [ROLLOUT_PLAN.md](ROLLOUT_PLAN.md). Upgrading an AMP release that still runs AMP's own core (port 8080, `cmd/server`): [MIGRATION_FROM_LEGACY_CORE.md](MIGRATION_FROM_LEGACY_CORE.md).
 
-Current runtime note (2026-03-09): this guide covers AMP's current controlled replacement surface. It includes the restored operational APIs `GET /api/v2/status`, `GET /api/v2/receivers`, `GET /api/v2/alerts/groups`, and `POST /-/reload`, but it still does not imply full Alertmanager drop-in parity.
+## 1. Check the configuration
 
----
+AMP reads `alertmanager.yml` with upstream's parser. If your Alertmanager is older than v0.34, check the file against the version AMP carries:
 
-## 🚀 3-Step Migration
-
-### Step 1: Deploy Alertmanager++
-
-#### Kubernetes (Helm)
 ```bash
-# Install from the repository-local chart with a values file —
-# helm/amp/README.md § Quick Start has a working values-small.yaml
-helm install amp ./helm/amp \
-  -f values-small.yaml \
-  --namespace monitoring
+amtool check-config alertmanager.yml
 ```
 
-The chart defaults start (status 2026-10-14, `HELM-DEFAULTS-VALIDATE`). LLM is off unless you set `llm.enabled: true` together with `llm.apiKey` (or `externalSecrets.enabled`); without a key the render fails. The bundled PostgreSQL has no TLS, so the chart lets AMP accept `sslmode=disable` for it under `environment: production` (the default), and AMP logs a `Database connection is NOT encrypted in production` warning with the database host; for an external database that check stays strict. For an external PostgreSQL set `postgresql.enabled: false` and `externalDatabase.*` (host, database, username, and `existingSecret` — a Secret you create with the password); `sslMode` defaults to `require`, and the password must be at least 12 characters under `environment: production`. See the chart README § PostgreSQL. Inhibit rules can stay at the top level, as upstream. Grouping is on by default (`grouping.enabled`), so the `route:` timings apply as they do upstream. See [Known Gaps](ALERTMANAGER_COMPATIBILITY.md#known-gaps-honesty-notes) #9 and #13–#15.
+Use `amtool` v0.34.x. Keys removed upstream before v0.34 fail here as they would on upstream v0.34.
 
-Put your routes and receivers into `configFile.content`; receivers declared there become delivery targets. Without any target AMP ingests alerts but stays in `metrics-only` mode.
+## 2. Deploy AMP
 
-#### Docker
-```bash
-docker run -d \
-  -p 9093:9093 \
-  -v $(pwd)/config.yaml:/app/config.yaml \
-  --name amp \
-  ghcr.io/ipiton/amp:latest
+### Helm
+
+```yaml
+# values.yaml
+alertmanager:
+  config:            # your alertmanager.yml, as YAML
+    route:
+      receiver: team
+      group_by: [alertname]
+    receivers:
+      - name: team
+        webhook_configs:
+          - url: http://hooks.example.internal/alerts
 ```
 
-The image is published to GHCR by tagged releases; until the first release, build it locally (`docker build -t amp .`) and use `amp` as the image name. See [CI And Image Publishing](CI.md).
+```bash
+helm install amp ./helm/amp -n monitoring --create-namespace -f values.yaml
+kubectl -n monitoring rollout status statefulset/amp
+```
 
----
+The defaults: one replica, the bundled PostgreSQL (dev/pilot only), LLM off, no authentication. Production values, external PostgreSQL, LLM, basic auth and HA: [helm/amp/README.md](../helm/amp/README.md). Receiver secrets: mount them with `extraVolumes`/`extraVolumeMounts` and use the `*_file` fields.
 
-### Step 2: Update Prometheus
+### Docker
+
+```bash
+docker run -d --name amp -p 9093:9093 \
+  -v "$PWD/alertmanager.yml:/etc/amp/alertmanager.yml:ro" \
+  ghcr.io/ipiton/amp:0.1.0
+```
+
+This runs the core only. Alert history, classification and K8s targets need an AMP configuration file and PostgreSQL ([CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md)):
+
+```bash
+docker run -d --name amp -p 9093:9093 \
+  -v "$PWD/alertmanager.yml:/etc/amp/alertmanager.yml:ro" \
+  -v "$PWD/amp.yaml:/etc/amp/amp.yaml:ro" \
+  -e DATABASE_PASSWORD -e LLM_API_KEY \
+  ghcr.io/ipiton/amp:0.1.0 \
+  --config.file=/etc/amp/alertmanager.yml --amp.config.file=/etc/amp/amp.yaml --storage.path=/data
+```
+
+## 3. Copy the silences
+
+```bash
+amtool --alertmanager.url=http://alertmanager.monitoring.svc:9093 silence query -o json > silences.json
+amtool --alertmanager.url=http://amp.monitoring.svc:9093 silence import < silences.json
+```
+
+Run the import once; a second run creates duplicates. Silences created on the old Alertmanager after the export are not copied.
+
+## 4. Point Prometheus at AMP
 
 ```yaml
 # prometheus.yml
 alerting:
   alertmanagers:
     - static_configs:
-        - targets:
-          # OLD: - 'alertmanager:9093'
-          - 'amp:9093'  # NEW: point to Alertmanager++
+        - targets: ["amp.monitoring.svc:9093"]
 ```
 
-Apply:
-```bash
-kubectl rollout restart deployment prometheus -n monitoring
-# OR
-docker restart prometheus
-```
+With `alertmanager.replicas` > 1 list every pod (`amp-0.amp-headless.monitoring.svc:9093`, …) or use DNS service discovery on the headless Service: as with upstream, every replica must receive every alert. With the Prometheus Operator, `alertmanagerEndpoints` in the `Prometheus` resource.
 
----
+To compare first, send to both: list Alertmanager and AMP side by side, and give AMP receivers that do not page anyone ([ROLLOUT_PLAN.md](ROLLOUT_PLAN.md) stage 1).
 
-### Step 3: Verify
+## 5. Verify
 
 ```bash
-# Check liveness and readiness
-curl http://localhost:9093/health
-curl http://localhost:9093/ready
-
-# Test alert ingestion
-curl -X POST http://localhost:9093/api/v2/alerts \
-  -H "Content-Type: application/json" \
-  -d '[{"labels":{"alertname":"test","severity":"info"}}]'
-
-# Query alerts (Alertmanager-compatible)
-curl http://localhost:9093/api/v2/alerts
-
-# Check grouped alerts for Grafana-style integrations
-curl http://localhost:9093/api/v2/alerts/groups
-
-# Check status and configured receivers
-curl http://localhost:9093/api/v2/status
-curl http://localhost:9093/api/v2/receivers
+AMP=http://amp.monitoring.svc:9093
+curl -fsS $AMP/-/ready
+amtool --alertmanager.url=$AMP config show
+amtool --alertmanager.url=$AMP alert query
+amtool --alertmanager.url=$AMP silence query
+amtool --alertmanager.url=$AMP cluster show
 ```
 
----
+Alerts and silences in a UI: karma or Grafana ([ALERTMANAGER_COMPATIBILITY.md](ALERTMANAGER_COMPATIBILITY.md#viewing-alerts-karma-grafana-amtool)); AMP v0.1.0 serves no UI.
 
-## ✅ Pilot Ready!
+## Rollback
 
-**That's it!** Your alerts are now flowing through AMP's current active runtime slice.
+Point Prometheus back at Alertmanager. Silences created on AMP meanwhile: export them from AMP and import them into Alertmanager the same way. See [ROLLBACK_RUNBOOK.md](ROLLBACK_RUNBOOK.md).
 
-### What Just Happened?
+## Troubleshooting
 
-- ✅ Alert ingest works through the active `/api/v2/alerts` path
-- ✅ Status, receivers, grouped alerts, and reload APIs are mounted in the active runtime
-- ✅ Silence CRUD and health/readiness endpoints are available
-- ✅ `/health` reports liveness, `/ready` reports readiness; optional degraded components can still return `200` with a degraded JSON body
-- ✅ Real publishing path is active when targets are discovered
-- 🟡 Wider Alertmanager parity remains phased/backlog work
-- 🟡 Validate dashboards, `amtool`, routing semantics and config APIs explicitly before claiming full replacement
-
----
-
-## 🔄 Rollback (if needed)
-
-```bash
-# Stop Alertmanager++
-kubectl delete deployment amp -n monitoring
-
-# Redeploy Alertmanager
-helm install alertmanager prometheus-community/alertmanager
-
-# Update Prometheus targets back to :9093
-```
-
----
-
-## 📚 Next Steps
-
-- **Migration details**: See [MIGRATION_COMPARISON.md](MIGRATION_COMPARISON.md)
-- **Feature comparison**: See [MIGRATION_COMPARISON.md](MIGRATION_COMPARISON.md)
-- **Configuration**: Validate your `alertmanager.yml` against the active runtime surface and check [CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md) for current caveats
-
----
-
-## 🆘 Troubleshooting
-
-**Alerts not showing up?**
-```bash
-# Check Prometheus is sending to correct endpoint
-kubectl logs -n monitoring prometheus-0 | grep amp
-
-# Check Alertmanager++ is receiving
-kubectl logs -n monitoring amp-0 | grep "POST /api/v2/alerts"
-```
-
-**Alerts are ingested, but Slack/PagerDuty/Rootly delivery does not happen?**
-- Verify `publishing.enabled=true`
-- Verify `kubectl get secret -n monitoring -l publishing-target=true`
-- Verify `publishing.discovery.namespace` matches the namespace where target Secrets live
-- If zero targets are discovered, the runtime remains in `metrics-only`
-
-**Grafana dashboard broken?**
-- Verify dashboard uses `/api/v2/alerts/groups` for grouped-alert views
-- Check datasource URL points to `amp:9093`
-
-**Need help?**
-- [GitHub Issues](https://github.com/ipiton/AMP/issues)
-- [Documentation](https://github.com/ipiton/AMP/tree/main/docs)
-
----
-
-**Last Updated**: 2026-03-09
-**Version**: v0.0.1
-**Compatibility**: Alertmanager v0.25+ API v2 (current non-deprecated active slice only)
+- **No alerts in AMP**: check Prometheus' `prometheus_notifications_errors_total` and `prometheus_notifications_alertmanagers_discovered`; with basic auth on, Prometheus needs `basic_auth` in its `alertmanagers` entry.
+- **AMP does not start**: the log names the `alertmanager.yml` error, exactly as upstream would. An AMP configuration error is reported as `error loading AMP configuration file`.
+- **Keys of your AMP configuration have no effect**: look for `AMP configuration keys ignored` in the log.
+- **`POST /api/v2/alerts` answers 415**: the client must send `Content-Type: application/json`.

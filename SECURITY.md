@@ -26,7 +26,7 @@ Please include as much of the following as you can:
 * Type of issue (e.g. authentication bypass, injection, information disclosure)
 * Affected component and file paths
 * The version, tag or commit where you found it
-* Configuration required to reproduce (config.yaml, alertmanager.yml, Helm values — with secrets removed)
+* Configuration required to reproduce (amp.yaml, alertmanager.yml, Helm values — with secrets removed)
 * Step-by-step instructions to reproduce
 * Proof-of-concept code, if possible
 * Impact: what an attacker can do and under which preconditions
@@ -43,9 +43,9 @@ This section describes what AMP actually provides today, so operators know which
 
 ### Authentication & Authorization
 
-* **Provided:** HTTP basic authentication using the upstream Alertmanager web config format (`--web.config.file`, `basic_auth_users` with bcrypt hashes), with password rotation without restart. Off by default — AMP logs a `WARN` at startup while the API is open. Helm: `webConfig.existingSecret`. See [`docs/CONFIGURATION_GUIDE.md`](docs/CONFIGURATION_GUIDE.md) → *Enable HTTP Authentication*.
+* **Provided:** HTTP basic authentication using the upstream Alertmanager web config format (`--web.config.file`, `basic_auth_users` with bcrypt hashes), with password rotation without restart. Off by default — AMP logs a `WARN` at startup while the API is open. Helm: `webConfig.existingSecret`. See [`docs/CONFIGURATION_GUIDE.md`](docs/CONFIGURATION_GUIDE.md) → *Flags*.
 * **Not provided:** bearer tokens, API keys, JWT, OAuth/OIDC, per-user roles. Every authenticated user has full access, including silences, `/-/reload` and LLM investigations. For SSO, put an authenticating proxy in front of AMP.
-* `webhook.authentication.*` in the application config is **not enforced**; AMP logs a `WARN` if it is enabled.
+* `/debug/pprof/*` and `/debug/vars` are served on the API port, as upstream, behind the same basic auth. The process command line is visible there: do not pass secrets in flags.
 
 ### Transport Security
 
@@ -61,7 +61,7 @@ This section describes what AMP actually provides today, so operators know which
 
 ### Kubernetes Permissions
 
-* No cluster-scoped RBAC. A single namespaced Role with `list secrets` in the target discovery namespace is created only when publishing target discovery is enabled. Redis and backup pods run without a service account token.
+* No cluster-scoped RBAC. A single namespaced Role with `list secrets` in the target discovery namespace is created only when publishing target discovery is enabled. The AMP pods mount a service account token only when discovery is enabled; the Valkey pod runs without one.
 * Containers run as non-root (UID 65534) with a read-only root filesystem, no privilege escalation and all capabilities dropped (chart defaults).
 
 ### Secrets
@@ -88,7 +88,7 @@ This section describes what AMP actually provides today, so operators know which
 - [ ] Scrape `/metrics` with basic auth (or list it in `server.auth.unauthenticated_paths` deliberately)
 - [ ] Store passwords and API keys (LLM provider, receivers) in Kubernetes Secrets, not in values files
 - [ ] Use TLS (`sslmode=require` or stricter) for an external PostgreSQL
-- [ ] Set a Redis/Valkey password and keep it reachable only from AMP
+- [ ] Set `valkey.replicas: 0` (`amp-upstream` does not use Valkey; `values-production.yaml` already does), or set its password and keep it reachable only from AMP
 - [ ] Add rate limiting and CORS at the ingress if the API is reachable from browsers or untrusted networks
 - [ ] Subscribe to this repository's security advisories (Watch → Custom → Security alerts)
 

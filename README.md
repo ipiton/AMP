@@ -1,270 +1,145 @@
-# Alertmanager++ 🚀
+# Alertmanager++ (AMP)
 
-> An alert management runtime that implements upstream Alertmanager's core pipeline mechanics (routing, grouping, notify chain, HA) on the control plane, with a Kubernetes-Secret-driven data plane
+> Upstream Prometheus Alertmanager, with alert history, LLM classification and investigation, Kubernetes-Secret notification targets and HA, in one binary.
 
 [![CI](https://github.com/ipiton/AMP/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ipiton/AMP/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/ipiton/AMP)](https://goreportcard.com/report/github.com/ipiton/AMP)
 
-## ✨ Features
+AMP's alerting core is not a reimplementation: the `amp-upstream` binary is built from the packages of [Prometheus Alertmanager](https://github.com/prometheus/alertmanager) **v0.34.1** (`config`, `dispatch`, `notify`, `silence`, `inhibit`, `nflog`, `provider/mem`, `cluster`, `api/v2`). Routing, grouping, silences, inhibition, time intervals, all 18 receiver integrations, templates and the `api/v2` handlers are upstream's code, pinned to that exact version. AMP adds a layer around it ([ADR-019](docs/06-planning/DECISIONS.md)).
 
-- **Control-Plane Parity** - Real routing tree, dispatcher/grouping semantics (`group_by`/`group_wait`/`group_interval`/`repeat_interval`), notify chain, mute/active time intervals, silences, inhibition, and HA clustering (Redis-backed dedup, leader election, peer heartbeat) mirror upstream Alertmanager's mechanics, not just its API shape
-- **Config-Driven Delivery** - `receivers[].*_configs` from your `alertmanager.yml` become delivery targets (webhook, Slack, PagerDuty, Telegram, email); `amp.receiver`-scoped Kubernetes Secrets still work as a second source. Some per-integration fields are parsed but not delivered — see [API Compatibility](docs/ALERTMANAGER_COMPATIBILITY.md) before migrating
-- **Lean Go Runtime** - Current top-level docs avoid unverified benchmark/resource claims until a reproducible benchmark report is published
-- **Extensible Architecture** - Code-level extension points for custom classifiers and publishers
-- **Controlled Migration** - Pilot-oriented quick start for scoped deployments and explicit verification
+## Features
 
-Current runtime note (2026-10-14): AMP is a **pilot-ready replacement candidate, not production-ready yet**. Its control plane (routing, grouping, dispatch, silences, inhibition, time-based muting, HA) mirrors upstream's mechanics, and since AMP-PARITY-WAVE6 the receivers in a copied `alertmanager.yml` deliver without any Kubernetes Secrets. The Helm chart's default values start since `HELM-DEFAULTS-VALIDATE` (LLM off by default; the bundled PostgreSQL runs without TLS, with a startup warning); the remaining differences are listed in [Known Gaps](docs/ALERTMANAGER_COMPATIBILITY.md#known-gaps-honesty-notes). The active runtime source of truth is `go-app/cmd/server/main.go` + `go-app/internal/application/router.go`; the full control-plane/data-plane breakdown is in `docs/ALERTMANAGER_COMPATIBILITY.md`.
+- **Upstream Alertmanager core**: your `alertmanager.yml` as it is, `amtool`, the Grafana Alertmanager data source and [karma](https://github.com/prymitive/karma) work as with upstream. What differs is listed in [docs/ALERTMANAGER_COMPATIBILITY.md](docs/ALERTMANAGER_COMPATIBILITY.md).
+- **Alert history** in PostgreSQL: every alert the core accepts, firing and resolved, silenced and inhibited ones included, written off the ingest path. Delivery does not depend on PostgreSQL.
+- **LLM classification**: each firing alert is classified asynchronously; a notification waits up to `llm.notify_wait` (default 5s) and carries the result in `llm_*` annotations, so templates can use it. Optional: drop alerts classified as noise (`llm.drop_noise`, off by default). Bring your own OpenAI-compatible endpoint and key.
+- **Investigation**: an LLM investigation per firing incident, optionally agentic with Prometheus, Loki, Kubernetes and PostgreSQL tools and runbooks.
+- **Kubernetes-Secret targets**: Secrets labelled `publishing-target=true` become webhook, Slack or PagerDuty integrations of your receivers, without putting credentials in `alertmanager.yml`.
+- **HA**: upstream's memberlist gossip between replicas; silences and the notification log are replicated and snapshotted to disk.
+- **API**: upstream `/api/v2` unchanged, plus AMP's routes under `/api/amp/v1/` (alert history and investigation by fingerprint).
 
-## 📊 Performance Note
+AMP v0.1.0 has **no web UI of its own** (planned after the release, `UPSTREAM-UI`), and the upstream UI is not part of the Go module, so it is not served either. Use karma, Grafana or `amtool` to look at alerts and silences.
 
-Top-level benchmark and resource comparison numbers have been removed from the README until they are backed by a reproducible benchmark report for the current `main` branch.
+Status: AMP is a pilot-stage project; v0.1.0 is its first tagged release.
 
-## 🚀 Quick Start
+## Quick Start
 
-### Using Docker
+### Helm
 
-```bash
-docker run -p 8080:8080 ghcr.io/ipiton/amp:latest
+Put your `alertmanager.yml` under `alertmanager.config` in a values file:
+
+```yaml
+# values.yaml
+alertmanager:
+  config:
+    route:
+      receiver: team
+      group_by: [alertname]
+    receivers:
+      - name: team
+        webhook_configs:
+          - url: http://hooks.example.internal/alerts
 ```
 
-Images (`linux/amd64`, `linux/arm64`) are published to GHCR by tagged releases. No release has been tagged yet, so until the first one this command has nothing to pull; build locally with `docker build -t amp .` meanwhile. See [CI And Image Publishing](docs/CI.md).
-
-### Using Helm
-
 ```bash
-helm install amp ./helm/amp
+helm install amp ./helm/amp -n monitoring --create-namespace -f values.yaml
 ```
 
-### From Source
+The defaults run one replica with a bundled PostgreSQL (dev/pilot only, no backups) and LLM off. Production values, external PostgreSQL, authentication and HA: [helm/amp/README.md](helm/amp/README.md).
+
+Point Prometheus at AMP as at any Alertmanager:
+
+```yaml
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["amp.monitoring.svc:9093"]   # with replicas > 1: every pod, see the chart README
+```
+
+### Docker
+
+```bash
+docker run -p 9093:9093 -v "$PWD/alertmanager.yml:/etc/amp/alertmanager.yml:ro" ghcr.io/ipiton/amp:0.1.0
+```
+
+Without `--amp.config.file` the container is plain upstream Alertmanager (no history, classification or K8s targets). Images (`linux/amd64`, `linux/arm64`) are published to GHCR by tagged releases; until `v0.1.0` is tagged, build locally with `docker build -t amp .` ([docs/CI.md](docs/CI.md)).
+
+### From source
 
 ```bash
 git clone https://github.com/ipiton/AMP.git
 cd AMP/go-app
 make build
-./bin/server
+./amp-upstream --config.file=alertmanager.yml --storage.path=data/
 ```
 
-### Configuration
+## Configuration
 
-Alertmanager++ uses **two configuration files** (like Prometheus + Alertmanager):
+Two files:
 
-#### 1. Application Config (`config.yaml`)
-
-Infrastructure settings (database, Redis, server, etc.):
+| File | Flag | Contents |
+|---|---|---|
+| `alertmanager.yml` | `--config.file` | Upstream Alertmanager configuration: `global`, `route`, `receivers`, `inhibit_rules`, `time_intervals`, `templates`. Read with upstream's parser. |
+| AMP configuration (`amp.yaml`) | `--amp.config.file` | `profile`, `database`, `llm`, `investigation`, `publishing` (K8s-Secret targets), `app`, `server`. Optional. |
 
 ```yaml
-# config.yaml - Application infrastructure
-profile: standard  # lite or standard
-
-server:
-  port: 8080
-  host: 0.0.0.0
-
+# amp.yaml
+profile: standard          # lite: no PostgreSQL, so no history, investigations or K8s targets
 database:
-  host: localhost
-  port: 5432
+  host: postgres.example.internal
   database: alerthistory
-  username: postgres
-  password: ${DATABASE_PASSWORD}
-
-redis:
-  addr: localhost:6379
-  password: ${REDIS_PASSWORD}
-
-log:
-  level: info
-  format: json
+  username: amp            # password: DATABASE_PASSWORD
+llm:
+  enabled: true
+  provider: openai
+  base_url: https://api.openai.com/v1
+  model: gpt-4o-mini       # key: LLM_API_KEY
+investigation:
+  enabled: true
 ```
 
-See `config.yaml.example` for all options.
+All keys: [config.yaml.example](config.yaml.example) and [docs/CONFIGURATION_GUIDE.md](docs/CONFIGURATION_GUIDE.md). Other flags are upstream's (`--web.listen-address`, `--web.external-url`, `--web.config.file`, `--data.retention`, `--cluster.*`); `amp-upstream --help` lists them.
 
-#### 2. Alertmanager Config (`alertmanager.yaml`)
+## API
 
-Routing and receivers (Alertmanager-compatible core syntax):
+| Path | What |
+|---|---|
+| `/api/v2/*` | Upstream Alertmanager API v2, unchanged |
+| `/-/healthy`, `/-/ready`, `POST /-/reload` | Upstream probes and reload |
+| `/metrics` | Upstream `alertmanager_*` metrics plus AMP's (`amp_*`, `alert_history_*`) |
+| `GET /api/amp/v1/alerts/{fingerprint}` | The alert's history record, also after it resolved |
+| `GET /api/amp/v1/alerts/{fingerprint}/investigation` | Its latest investigation |
 
-```yaml
-# alertmanager.yaml - Routing configuration
-global:
-  resolve_timeout: 5m
+`{fingerprint}` is the one `api/v2` reports. All paths sit under the path of `--web.external-url`, behind the same basic auth (`--web.config.file`). Details: [docs/ALERTMANAGER_COMPATIBILITY.md](docs/ALERTMANAGER_COMPATIBILITY.md#amp-api).
 
-route:
-  receiver: default
-  group_by: [alertname]
-  routes:
-    - receiver: pagerduty-critical
-      match:
-        severity: critical
-    - receiver: slack-warnings
-      match:
-        severity: warning
+## Documentation
 
-receivers:
-  - name: default
-    webhook_configs:
-      - url: https://webhook.example.com/alerts
+- [Alertmanager compatibility](docs/ALERTMANAGER_COMPATIBILITY.md): what is upstream, what AMP adds, the differences
+- [Configuration guide](docs/CONFIGURATION_GUIDE.md): the AMP configuration file, the chart values that generate it
+- [Migrating from Alertmanager](docs/MIGRATION_QUICK_START.md) and the [rollout plan](docs/ROLLOUT_PLAN.md)
+- [Upgrading from AMP's own core (`cmd/server`)](docs/MIGRATION_FROM_LEGACY_CORE.md)
+- [Rollback runbook](docs/ROLLBACK_RUNBOOK.md)
+- [Helm chart](helm/amp/README.md)
+- [CI and image publishing](docs/CI.md), [upstream version bumps](docs/UPSTREAM_UPGRADE.md)
+- [Security policy](SECURITY.md)
 
-  - name: pagerduty-critical
-    pagerduty_configs:
-      - routing_key: ${PAGERDUTY_KEY}
+## Security
 
-  - name: slack-warnings
-    slack_configs:
-      - api_url: ${SLACK_WEBHOOK}
-        channel: "#alerts"
-```
+- HTTP basic auth via the upstream `--web.config.file` format (off by default); probes stay open.
+- No TLS termination in AMP: terminate TLS at the ingress or service mesh.
+- `/debug/*` (pprof, `expvar`) is served on the API port, as upstream: keep the port off public networks and do not pass secrets in flags.
+- Namespaced, least-privilege RBAC and an optional NetworkPolicy in the Helm chart; `govulncheck` on every pull request.
 
-See `go-app/internal/infrastructure/routing/testdata/production.yaml` for full example.
+See [SECURITY.md](SECURITY.md).
 
-**Historical runtime config contract (not active in current bootstrap):**
-```bash
-# Read current runtime config snapshot (JSON)
-curl http://localhost:8080/api/v2/config
+## Contributing
 
-# Read runtime config snapshot as YAML
-curl "http://localhost:8080/api/v2/config?format=yaml"
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Before a pull request, run `./scripts/release-gate.sh`; CI runs the same gate ([docs/CI.md](docs/CI.md)).
 
-# Update runtime config from file (applies inhibition/receivers immediately)
-curl -X POST http://localhost:8080/api/v2/config \
-  --data-binary @alertmanager.yaml
+## License
 
-# Check runtime config apply status
-curl http://localhost:8080/api/v2/config/status
+AGPL 3.0, see [LICENSE](LICENSE). The upstream Alertmanager code AMP uses and ports is Apache-2.0, by The Prometheus Authors (`go-app/internal/upstreamcore/doc.go`).
 
-# Check runtime config apply history
-curl "http://localhost:8080/api/v2/config/history?limit=20"
+## Acknowledgments
 
-# Filter history by apply status/source
-curl "http://localhost:8080/api/v2/config/history?status=ok&source=rollback&limit=20"
-
-# List unique successful config revisions for rollback target selection
-curl "http://localhost:8080/api/v2/config/revisions?limit=20"
-
-# Prune old revisions (keep N newest unique successful revisions)
-curl -X DELETE "http://localhost:8080/api/v2/config/revisions/prune?keep=20"
-
-# Preview prune result without applying changes
-curl -X DELETE "http://localhost:8080/api/v2/config/revisions/prune?keep=20&dryRun=true"
-
-# Roll back to previous successful runtime config revision
-curl -X POST http://localhost:8080/api/v2/config/rollback
-
-# Roll back to a specific successful revision by config hash
-curl -X POST "http://localhost:8080/api/v2/config/rollback?configHash=<sha256>"
-
-# Preview rollback result without applying changes
-curl -X POST "http://localhost:8080/api/v2/config/rollback?configHash=<sha256>&dryRun=true"
-
-# Apply config file changes and reload runtime metadata
-curl -X POST http://localhost:8080/-/reload
-
-# Or via Kubernetes ConfigMap
-kubectl create configmap alertmanager-config \
-  --from-file=alertmanager.yaml
-```
-
-`POST /api/v2/config/rollback` returns `409` if there is no previous successful revision to roll back to.
-`POST /api/v2/config/rollback?configHash=...` returns `400` for invalid hash, `404` for unknown revision, `409` if the requested revision is already active.
-`GET /api/v2/config/history` supports `status=ok|failed` and `source=<startup|api|reload|rollback>` filters.
-`GET /api/v2/config/revisions` returns unique successful revisions (`configHash`, `source`, `appliedAt`, `isCurrent`) for targeted rollback selection.
-`DELETE /api/v2/config/revisions/prune?keep=...` prunes old revision targets and keeps newest unique successful revisions.
-Both rollback and prune support `dryRun=true` preview mode without mutating runtime/file state.
-
-## 📚 Documentation
-
-- **[Migration from Alertmanager](docs/MIGRATION_QUICK_START.md)** - Controlled migration quick start
-- **[API Compatibility](docs/ALERTMANAGER_COMPATIBILITY.md)** - Feature parity matrix, control-plane/data-plane split, and known gaps
-- **[Extension Examples](examples/README.md)** - Custom classifiers and publishers
-- **[CI And Image Publishing](docs/CI.md)** - What CI checks, how to reproduce it locally, how images are released
-- **[Security Policy](SECURITY.md)** - Vulnerability reporting
-
-Compatibility note: AMP's control plane (routing/grouping/dispatch/silences/inhibition/time-windows/HA) implements upstream Alertmanager's core mechanics, with a documented, tracked list of gaps. Receivers from `alertmanager.yml` deliver; per-integration field fidelity is partial, and `amp.receiver`-scoped Secrets remain a second target source (an endpoint declared in both delivers twice). Before migrating, read the Known Gaps — three of them change behaviour on a verbatim upstream config. Config write API and `/history*` remain explicit follow-up work.
-
-## 🏗️ Architecture
-
-Alertmanager++ is built on a clean, extensible architecture:
-
-```
-pkg/core/                   # Core interfaces (zero dependencies)
-├── interfaces/             # Pluggable interfaces
-│   ├── storage.go         # Storage abstraction
-│   ├── classifier.go      # Alert classification
-│   └── publisher.go       # Publishing targets
-└── domain/                 # Domain models
-    ├── alert.go           # Alert structures
-    ├── silence.go         # Silence management
-    └── classification.go  # Classification metadata
-```
-
-### Key Components
-
-- **Alert Grouping** - Smart alert aggregation
-- **Silencing** - Flexible silence management with matchers
-- **Inhibition** - Alert suppression based on rules
-- **Publishing** - Multi-target alert routing (Slack, PagerDuty, Rootly, Webhook)
-- **Dashboard** - Modern web UI
-
-## 🔌 Extensibility
-
-Build your own extensions using the existing extension interfaces:
-
-### Custom Classifier Example
-
-```go
-import "github.com/ipiton/AMP/pkg/core/interfaces"
-
-type MyClassifier struct{}
-
-func (c *MyClassifier) ClassifyAlert(ctx context.Context, alert core.Alert) (*core.ClassificationResult, error) {
-    // Your ML model here
-    return &core.ClassificationResult{
-        Severity: "high",
-        Confidence: 0.95,
-    }, nil
-}
-```
-
-See [examples/](examples/) for complete working implementations:
-- **Custom ML Classifier** - ML-based alert classification
-- **Custom Publisher** - Microsoft Teams integration
-
-## 🔐 Security
-
-- HTTP basic auth via the upstream `--web.config.file` format (off by default)
-- No TLS termination in AMP: terminate TLS at the ingress or service mesh
-- Namespaced, least-privilege RBAC and an optional NetworkPolicy in the Helm chart
-- `govulncheck` on every pull request
-
-See [SECURITY.md](SECURITY.md) for the full security posture and private vulnerability reporting.
-
-## 🤝 Contributing
-
-We welcome contributions! See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community guidelines.
-
-### How to Contribute
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests
-5. Run `./scripts/release-gate.sh` — CI runs the same gate ([docs/CI.md](docs/CI.md))
-6. Submit a pull request
-
-## 📄 License
-
-AGPL 3.0 - See [LICENSE](LICENSE) for details.
-
-## 🙏 Acknowledgments
-
-- Prometheus Alertmanager team for the excellent original project
-- Open source community for inspiration and contributions
-
-## 📞 Support
-
-- **Documentation**: [docs/](docs/)
-- **Issues**: [GitHub Issues](https://github.com/ipiton/AMP/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/ipiton/AMP/discussions)
-
----
-
-**Made with ❤️ by the Alertmanager++ team**
+The Prometheus Alertmanager team, whose code is AMP's core.

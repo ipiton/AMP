@@ -15,7 +15,6 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
-- [ ] **UPSTREAM-DOCS-MIGRATION** — срез 7 ADR-019 (последний): README, `ALERTMANAGER_COMPATIBILITY.md`, `config.yaml.example`, миграция values и CHANGELOG breaking, ревизия ADR-002/006/009/016/017. Срезы 1–6 смержены 2026-11-08. Lightweight, 2–3d. Claimed 2026-11-08, worktree.
 
 ## Queue
 

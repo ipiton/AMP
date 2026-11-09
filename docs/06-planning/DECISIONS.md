@@ -8,6 +8,7 @@
 
 ## ADR-002: Alertmanager Replacement Scope Is Active-Runtime-First
 - **Дата**: 2026-03-08
+- **Статус**: заменён ADR-019 (2026-11-08, `UPSTREAM-DOCS-MIGRATION`). Ядро доставки — пакеты upstream Alertmanager, совместимость — по построению, а не по объёму собственного runtime; claim «controlled replacement» и сам `cmd/server` сняты (`UPSTREAM-CORE-REMOVAL`). См. `docs/ALERTMANAGER_COMPATIBILITY.md`.
 - **Контекст**: Historical docs, DONE entries и parity tests начали описывать runtime шире, чем текущий active bootstrap в `go-app/cmd/server/main.go` и `go-app/internal/application/router.go`.
 - **Решение**:
   - source of truth для replacement story — active runtime, а не historical docs/tests;
@@ -28,6 +29,7 @@
 
 ## ADR-004: Active Storage Bootstrap Is Profile-Aware And State-Aware
 - **Дата**: 2026-03-09
+- **Статус**: заменён ADR-019 (2026-11-08, `UPSTREAM-DOCS-MIGRATION`). `cmd/server`, SQLite-хранилище lite и алиасы `/health`, `/healthz`, `/ready`, `/readyz` удалены (`UPSTREAM-CORE-REMOVAL`, `UPSTREAM-API-UI`). В силе только часть про PostgreSQL: `amp-upstream` подключается и мигрирует на старте, но при недоступной БД не падает, а работает без истории до рестарта (доставка от БД не зависит).
 - **Контекст**: Active runtime в `go-app/internal/application/service_registry.go` держал `nil` placeholder для `core.AlertStorage`, standard migrations были незавершенными, а health/readiness handlers отвечали статическим success независимо от реального storage/bootstrap state.
 - **Решение**:
   - `ProfileLite` использует `internal/infrastructure.SQLiteDatabase` как canonical embedded storage runtime с обязательными `Connect()` и `MigrateUp()` до публикации storage;
@@ -42,6 +44,7 @@
 
 ## ADR-005: Active Dashboard Placeholder Pages Stay On Current `/dashboard/*` Surface
 - **Дата**: 2026-03-09
+- **Статус**: заменён ADR-019 (2026-11-08, `UPSTREAM-DOCS-MIGRATION`). `/dashboard/*` удалён вместе с `cmd/server`; своего UI в v0.1.0 нет, он отложен в `UPSTREAM-UI` (владелец, 2026-11-08).
 - **Контекст**: В active runtime `/dashboard/silences`, `/dashboard/llm` и `/dashboard/routing` были смонтированы, но возвращали placeholder body. При этом в репозитории уже существовал второй UI stack (`internal/ui` + `cmd/server/handlers`), который не был active source of truth для этих routes.
 - **Решение**:
   - canonical active owner этих страниц остается в current `go-app/cmd/server` path, а не переносится на dormant `/ui/*` subsystem;
@@ -55,6 +58,7 @@
 
 ## ADR-006: Restored Operational Alertmanager Endpoints Stay Inside The Controlled-Replacement Scope
 - **Дата**: 2026-03-09
+- **Статус**: заменён ADR-019 (2026-11-08, `UPSTREAM-DOCS-MIGRATION`). `status`, `receivers`, `alerts/groups` и `/-/reload` теперь обслуживают handlers upstream `api/v2` и `reloader` upstream; `internal/application/router.go` и `ServiceRegistry` удалены.
 - **Контекст**: После ADR-002 active runtime был сознательно сужен до controlled-replacement narrative, но practical Grafana / automation flows все еще требовали `GET /api/v2/status`, `GET /api/v2/receivers`, `GET /api/v2/alerts/groups` и `POST /-/reload` в current mounted router.
 - **Решение**:
   - active runtime снова монтирует `status`, `receivers`, `alerts/groups` и `reload` в `go-app/internal/application/router.go`;
@@ -97,6 +101,7 @@
 
 ## ADR-009: AMP машиночитаемо заявляет версию КОНТРАКТА Alertmanager, а не свою
 - **Дата**: 2026-09-23
+- **Статус**: заменён ADR-019 (2026-11-08, `UPSTREAM-DOCS-MIGRATION`). `alertmanager_build_info` отдаёт version collector upstream с настоящей версией upstream (`0.34.1`, через ldflags), а не константу `0.27.0`: контракт и есть код этой версии. `amp_build_info` с версией AMP остаётся.
 - **Контекст**: Инструменты экосистемы Alertmanager определяют версию сервера не через `GET /api/v2/status`, а разбирая `/metrics` и читая лейбл `version` у `alertmanager_build_info` (karma: `internal/verprobe/verprobe.go`). AMP такой метрики не экспортировал, проба падала на каждом цикле опроса. Наивное «отдать свою версию» оказалось не фиксом, а регрессом: `git describe` даёт `v0.0.2-518-g3b3c52e`, karma режет строку по первому дефису и проверяет остаток констрейнтом `>=0.22.0`; `0.0.2` его не проходит, маппер не находится, и karma **очищает уже показанные алерты**. Дефолт `buildinfo.Version = "dev"` не semver вовсе, а парсится он через `semver.MustParse`, который паникует. То есть до этой задачи karma работала с AMP именно потому, что проба ЛОМАЛАСЬ и срабатывал fallback «считать самым свежим» (`999.0`).
 - **Решение**:
   - экспортируются ДВЕ метрики с разным смыслом: `alertmanager_build_info{version,revision,branch,goversion}`, где `version` — константа `0.27.0`, версия реализуемого upstream-контракта; и `amp_build_info{version,revision,branch,goversion,build_user,build_date}` с настоящими данными сборки;
@@ -247,6 +252,7 @@
 
 ## ADR-016: Прод-путь PostgreSQL — внешний PostgreSQL; встроенный — dev/pilot single instance без бэкапов
 - **Дата**: 2026-10-15
+- **Статус**: в силе, пересмотрен ADR-019 (2026-11-08, `UPSTREAM-DOCS-MIGRATION`): PostgreSQL больше не стоит на пути ingest и доставки (история пишется асинхронно, при недоступной БД `amp-upstream` работает без неё), поэтому довод «БД недоступна ⇒ `POST /api/v2/alerts` отвечает 500» из контекста больше не действует. Решение про внешний PostgreSQL для прода и dev/pilot-встроенный не меняется. `configFile.content` в тексте ниже — теперь `alertmanager.ampConfig.database` или `externalDatabase.*`.
 - **Контекст**:
   - аудит 2026-10-06 (`PROD-POSTGRES-HA-DECISION`, P0): чарт обещал HA, PITR и ежедневные base backups встроенного PostgreSQL;
   - измерения на k3d 2026-10-15 (`tasks/archive/PROD-POSTGRES-HA-DECISION/evidence/`) показали, что ничего из этого не работает:
@@ -281,6 +287,7 @@
 
 ## ADR-017: Кеш AMP в чарте — Valkey; Redis ≥ 7.4 не используется
 - **Дата**: 2026-10-19
+- **Статус**: частично снят ADR-019 (2026-11-08, `UPSTREAM-DOCS-MIGRATION`): `amp-upstream` кеш не использует (nflog и silences — в снапшотах upstream на `--storage.path`), `cache.*` из values удалены. StatefulSet Valkey чарт пока ставит, без потребителя (`valkey.replicas: 0` его гасит), до `UPSTREAM-AI-HA-DEDUP`; в силе лицензионная часть решения: Redis ≥ 7.4 не используется.
 - **Контекст**:
   - собственный StatefulSet чарта (`<fullname>-redis`) запускал `redis:7-alpine`; на 2026-10-19 этот тег резолвится в Redis 7.4.11, который с 7.4 распространяется под RSALv2/SSPLv1, а не BSD. AMP — AGPL-3.0, и такая лицензия кеша владельцу не подходит (решение владельца 2026-10-19, `HELM-SINGLE-NODE-DEFAULTS`);
   - рядом в каждом `standard`-рендере жил сабчарт `valkey` (groundhog2k 2.1.3, `condition: cache.enabled`): AMP в него не ходил (`cache.host` → `<fullname>-redis`), под падал в `Init:Error` (BUGS `VALKEY-SUBCHART-INIT-ERROR`), а ресурсы и PVC 5Gi занимал;
@@ -333,7 +340,7 @@
   - annotations, пришедшие после первого уведомления группы, повторной отправки не вызывают (nflog AM) — отсюда бюджет < `group_wait`;
   - эпик ~12–18d, шесть срезов, первым — PoC 4–5d (форвардер, annotations, fail-open, e2e Prometheus → AMP → AM на k3d); нарезка в `BACKLOG.md` — задача `ADR-018-V3-PROXY-SLICING`. `PROD-LLM-ALERT-PATH-ISOLATION` поглощается PoC;
   - паритетные позиции Queue, `REVIEW-PIPELINE-2026-10-21.md`, `BUGS.md`, `TECH-DEBT.md` не берутся; security/critical — только по коду, который переживает переход (ingest, LLM, investigation, история, UI, auth);
-  - ADR-002, -006, -009, -016, -017 пересматриваются в срезах, которые их затрагивают;
+  - ADR-002, -006, -009, -016, -017 пересматриваются в срезах, которые их затрагивают (пересмотрены в `UPSTREAM-DOCS-MIGRATION`, 2026-11-08: 002, 004, 005, 006, 009 заменены, 016 и 017 уточнены статусом);
   - открыто: интеграция Rootly (webhook AM или отказ), доставка результата investigation в тред (свой клиент мессенджера вне паритета).
 
 ## ADR-019: AMP — замена Alertmanager на пакетах upstream; HA — memberlist upstream
@@ -364,7 +371,7 @@
   - breaking для пилотных инсталляций: silences переносятся из PostgreSQL в снапшот upstream, Redis-состояние сбрасывается, теряются AMP-расширения API (`?group_by=`, `global.group_by`), если не держать их отдельными маршрутами;
   - чарт: StatefulSet, headless Service и порт gossip; Valkey остаётся только как кеш классификации;
   - позиции Queue, `REVIEW-PIPELINE-2026-10-21.md`, `BUGS.md`, `TECH-DEBT.md` на совместимость не берутся — их закрывает код upstream; security/critical — по коду, который переживает переход; `PROD-LLM-ALERT-PATH-ISOLATION` закрывается срезом AI-хуков;
-  - ADR-002, -006, -009, -016, -017 пересматриваются в срезах, которые их затрагивают;
+  - ADR-002, -006, -009, -016, -017 пересматриваются в срезах, которые их затрагивают (пересмотрены в `UPSTREAM-DOCS-MIGRATION`, 2026-11-08: 002, 004, 005, 006, 009 заменены, 016 и 017 уточнены статусом);
   - открыто: K8s-Secret таргеты — адаптер в `config.Receiver` или удаление (решается в срезе интеграций).
 - **PoC пройден** (владелец, 2026-10-24): вердикт `UPSTREAM-CORE-POC-GATE` принят — сьюты на upstream-ядре расходятся только AMP-only поверхностью, форматом ошибок и деталями своего ядра, разрывов доставки нет (`tasks/archive/UPSTREAM-CORE-POC-GATE/divergences.md`). Эпик продолжается, срезы 2–4 свободны.
 - **`/debug/*` — как upstream** (владелец, 2026-10-24): pprof и `expvar` (`/debug/vars`: `cmdline`, `memstats`) на основном порту, без своего вырезания и флага. Прежнее решение AMP убрать `/debug` отменено; ограничение доступа — сетью (порт не публикуется наружу), как у upstream Alertmanager. В migration notes среза 7 — с предупреждением: `cmdline` виден всем, кто достаёт до порта, секреты во флагах не передавать.

@@ -66,7 +66,7 @@ Each baseline entry has a class:
 
 | Class | Meaning |
 |---|---|
-| `a` | AMP-only surface the upstream core does not have (health aliases, UI, `/api/v1`) |
+| `a` | AMP-only surface not decided yet (none left: UPSTREAM-API-UI moved each one to `d`) |
 | `b` | The test pinned AMP's own core; upstream is the reference |
 | `c` | A gap in AMP's wiring of the upstream core |
 | `d` | Upstream behaves differently from a deliberate AMP decision; owner's call |

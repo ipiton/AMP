@@ -1,18 +1,15 @@
 # AMP Helm Deployment Guide
 
-This guide covers operator-facing installation and verification for the `helm/amp` chart.
-Treat the chart as a controlled replacement deployment path for the active runtime surface documented in `helm/amp/README.md`, not as a verified full Alertmanager drop-in replacement.
+Operator-facing installation and verification for the `helm/amp` chart. The chart runs `amp-upstream` (upstream Alertmanager v0.34.1 plus AMP's layer) as a StatefulSet on port 9093. Values reference: [README.md](README.md). Upgrading a release of the chart before v0.1.0: [MIGRATION_FROM_LEGACY_CORE.md](../../docs/MIGRATION_FROM_LEGACY_CORE.md).
 
 ## Prerequisites
 
 - Kubernetes cluster with `kubectl` access
-- Helm 3.8+
-- A release name that contains `amp` if you want resource names to stay short in the examples below
-- Optional: BYOK LLM credentials provided via a local override, secret, or external secret
+- Helm 3.8+ (3.14+ for `--reset-then-reuse-values`)
+- Your `alertmanager.yml`, to put under `alertmanager.config` in a values file
+- Optional: LLM credentials in a Secret or an external secret
 
-## 1. Lite / Development Deployment
-
-Use the development overrides when you want a single-release evaluation path with embedded storage and no external database dependency.
+## 1. Development Deployment
 
 ```bash
 RELEASE=amp-dev
@@ -21,112 +18,131 @@ NAMESPACE=monitoring
 helm upgrade --install "$RELEASE" ./helm/amp \
   --namespace "$NAMESPACE" \
   --create-namespace \
-  --set profile=lite \
-  -f helm/amp/values-dev.yaml
+  -f helm/amp/values-dev.yaml \
+  -f my-alertmanager.yaml          # alertmanager.config: <your alertmanager.yml>
 ```
+
+`values-dev.yaml` uses the bundled PostgreSQL (dev/pilot only). For the core alone, without PostgreSQL, add `--set profile=lite --set postgresql.enabled=false`.
 
 Verify the release:
 
 ```bash
-kubectl rollout status deployment/"$RELEASE" -n "$NAMESPACE"
-kubectl port-forward svc/"$RELEASE" 8080:8080 -n "$NAMESPACE"
+kubectl rollout status statefulset/"$RELEASE" -n "$NAMESPACE"
+kubectl port-forward svc/"$RELEASE" 9093:9093 -n "$NAMESPACE"
 
-curl http://127.0.0.1:8080/healthz
-curl http://127.0.0.1:8080/api/v2/status
+curl http://127.0.0.1:9093/-/ready
+curl http://127.0.0.1:9093/api/v2/status
 ```
 
-## 2. Standard / Cluster Deployment
+## 2. Production Deployment
 
-Use the production-oriented overrides when you want the chart-managed PostgreSQL and cache path.
+`values-production.yaml` runs three replicas against an external PostgreSQL, with a NetworkPolicy, and ships no credentials: the render fails until the database, its Secret, the policy's sources and HTTP authentication are set (it enables an Ingress, which the chart refuses to publish without auth). Put the policy's sources in your values file next to `alertmanager.config`:
+
+```yaml
+# my-alertmanager.yaml
+alertmanager:
+  config: {}                # your alertmanager.yml
+networkPolicy:
+  alertSenders:             # who may send alerts and call the API
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+  metricsScrapers: []       # Prometheus, if it is not among alertSenders
+```
 
 ```bash
 RELEASE=amp
 NAMESPACE=monitoring
 
+kubectl create secret generic amp-db -n "$NAMESPACE" --from-literal=password="$PG_PASSWORD"
+
 helm upgrade --install "$RELEASE" ./helm/amp \
   --namespace "$NAMESPACE" \
   --create-namespace \
-  --set profile=standard \
   -f helm/amp/values-production.yaml \
-  --set postgresql.password="$PG_PASSWORD" \
-  --set cache.auth.password="$CACHE_PASSWORD"
+  -f my-alertmanager.yaml \
+  --set externalDatabase.host=pg.example.internal \
+  --set externalDatabase.database=amp \
+  --set externalDatabase.username=amp \
+  --set externalDatabase.existingSecret=amp-db \
+  --set webConfig.existingSecret=amp-web-config \
+  --set monitoring.serviceMonitor.basicAuth.secretName=amp-metrics-auth
 ```
 
-The production values file deliberately ships NO passwords: rendering fails
-loud (a `required` guard) until both are supplied — via `--set` as above, or
-an ExternalSecret/ESO flow. Never commit real values into the values file.
+The two auth Secrets are created as in [§ 4](#4-http-authentication). Without an Ingress, `--set ingress.enabled=false` instead.
 
 Inspect the resulting resources:
 
 ```bash
-kubectl get pods -n "$NAMESPACE" -l app.kubernetes.io/instance="$RELEASE"
-kubectl get svc -n "$NAMESPACE"
-kubectl get statefulset -n "$NAMESPACE"
+kubectl get pods,statefulset,svc,pvc -n "$NAMESPACE" -l app.kubernetes.io/instance="$RELEASE"
 ```
+
+The release has two Services: `$RELEASE` (ClusterIP, for clients) and `$RELEASE-headless` (per-pod DNS for Prometheus and gossip). With more than one replica Prometheus must send to every pod: list `$RELEASE-<i>.$RELEASE-headless.$NAMESPACE.svc:9093`, or use DNS service discovery on the headless Service.
 
 ## 3. Optional LLM Configuration
 
-If you enable LLM classification, pass the API key through a local override, secret, or external secret. Do not commit real keys into chart values files.
-
-Example local override:
+Classification and investigation are off by default. Pass the key through a Secret or an external secret; do not commit real keys into values files.
 
 ```bash
-LLM_API_KEY=...
-
-helm upgrade --install "$RELEASE" ./helm/amp \
-  --namespace "$NAMESPACE" \
-  --create-namespace \
-  --set profile=lite \
+helm upgrade --install "$RELEASE" ./helm/amp -n "$NAMESPACE" \
+  -f my-values.yaml \
   --set llm.enabled=true \
+  --set llm.proxyUrl=https://llm.example.internal/v1 \
   --set llm.apiKey="$LLM_API_KEY"
 ```
 
-The chart also exposes `llm.secret.*` and `llm.externalSecrets.*` values for secret-backed setups.
+The chart also exposes `llm.secret.*` and `llm.externalSecrets.*` for secret-backed setups ([README.md](README.md)).
 
 ## 4. HTTP Authentication
 
-Without a web config the API is open to anyone who can reach the service. To enable basic auth, create a Secret with an upstream-format web config and set `webConfig.existingSecret`:
+Without a web config the API is open to anyone who can reach the Service. To enable basic auth, create a Secret with an upstream-format web config and set `webConfig.existingSecret`:
 
 ```bash
 printf 'basic_auth_users:\n  prometheus: %s\n' "$(htpasswd -nbBC 10 prometheus "$AMP_PASSWORD" | cut -d: -f2)" > web-config.yml
 kubectl create secret generic amp-web-config -n "$NAMESPACE" --from-file=web-config.yml
 rm web-config.yml
 
-helm upgrade --install "$RELEASE" ./helm/amp -n "$NAMESPACE" --reuse-values \
-  --set webConfig.existingSecret=amp-web-config
+kubectl create secret generic amp-metrics-auth -n "$NAMESPACE" \
+  --from-literal=username=prometheus --from-literal=password="$AMP_PASSWORD"
+
+helm upgrade --install "$RELEASE" ./helm/amp -n "$NAMESPACE" -f my-values.yaml \
+  --set webConfig.existingSecret=amp-web-config \
+  --set monitoring.serviceMonitor.basicAuth.secretName=amp-metrics-auth
 ```
 
-With auth enabled, add `-u prometheus:"$AMP_PASSWORD"` to the `curl` checks in this guide (only `/-/healthy` and `/-/ready` answer without credentials) and configure `basic_auth` in Prometheus. Do not combine with `configReloader.enabled`: the chart refuses to render it.
+Auth protects `/metrics` too: the chart refuses to render a ServiceMonitor without credentials (`monitoring.serviceMonitor.basicAuth.*`, or `monitoring.serviceMonitor.enabled=false`). With auth enabled, add `-u prometheus:"$AMP_PASSWORD"` to the `curl` checks in this guide (only `/-/healthy` and `/-/ready` answer without credentials) and configure `basic_auth` in Prometheus.
+
+Keep a values file per release and pass it on every upgrade. `--reuse-values` keeps the values of the previous chart, including keys this chart no longer reads; on an upgrade from a chart before v0.1.0 the render refuses them.
 
 ## 5. Routing Alertmanager Traffic
-
-The chart exposes the active runtime over the service HTTP port (`service.port`, default `8080`).
-Only redirect Alertmanager traffic after validating that the covered slice matches your operational needs.
 
 ```yaml
 alerting:
   alertmanagers:
     - static_configs:
         - targets:
-          - amp:8080
+          - amp-0.amp-headless.monitoring.svc:9093
+          - amp-1.amp-headless.monitoring.svc:9093
+          - amp-2.amp-headless.monitoring.svc:9093
 ```
 
-If your Helm release name differs from `amp`, use the rendered service name instead.
+If your release name differs from `amp`, use the rendered Service names. For a staged move from Alertmanager, see [ROLLOUT_PLAN.md](../../docs/ROLLOUT_PLAN.md).
 
 ## 6. Post-Install Checks
 
-Helpful checks after install:
-
 ```bash
-kubectl logs deployment/"$RELEASE" -n "$NAMESPACE"
-kubectl get configmap "${RELEASE}-config" -n "$NAMESPACE"
+kubectl logs statefulset/"$RELEASE" -n "$NAMESPACE"
+kubectl get configmap "$RELEASE" "$RELEASE-amp-config" -n "$NAMESPACE"
 
-curl http://127.0.0.1:8080/readyz
-curl http://127.0.0.1:8080/api/v2/receivers
-curl http://127.0.0.1:8080/metrics
+curl http://127.0.0.1:9093/-/ready
+curl http://127.0.0.1:9093/api/v2/receivers
+curl http://127.0.0.1:9093/metrics | grep -E '^(alertmanager_cluster_members|alertmanager_config_last_reload_successful)'
+amtool --alertmanager.url=http://127.0.0.1:9093 cluster show
 ```
+
+The `$RELEASE` ConfigMap holds `alertmanager.yml`, `$RELEASE-amp-config` the AMP configuration rendered from the values. The log reports AMP configuration keys it does not know (`AMP configuration keys ignored`).
 
 ## 7. Notes
 
-- Keep `helm/amp/README.md` as the chart-level source of truth for compatibility claims and the currently mounted runtime surface.
-- Wider parity such as config/history APIs, broader dashboard parity, and other historical compatibility layers remains explicit follow-up work.
+- [README.md](README.md) is the chart-level source of truth for values; [ALERTMANAGER_COMPATIBILITY.md](../../docs/ALERTMANAGER_COMPATIBILITY.md) for API behaviour.
+- AMP v0.1.0 serves no UI: use karma, Grafana or `amtool`.

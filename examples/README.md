@@ -1,6 +1,8 @@
 # AMP Extension Examples
 
-This directory contains small reference examples for extension patterns around the current `pkg/core` contracts, plus a few integration snippets for external systems.
+This directory contains small reference examples for extension patterns, plus a few integration snippets for external systems.
+
+> **Outdated Go examples.** `custom-classifier/` and `custom-publisher/` import `pkg/core`, which no longer exists: they do not build against v0.1.0 and are kept for reference only. Since v0.1.0 notifications go through upstream Alertmanager receivers and AMP's Kubernetes-Secret targets ([docs/ALERTMANAGER_COMPATIBILITY.md](../docs/ALERTMANAGER_COMPATIBILITY.md#kubernetes-secret-targets)).
 
 The files here are best read as examples of shape and wiring. They are not, by themselves, a promise of a full plugin system or a broader runtime compatibility contract.
 
@@ -22,7 +24,7 @@ Primary file:
 
 ### `k8s/`
 
-Example Kubernetes Secret manifests for external notification integrations.
+Example Kubernetes Secret manifests for external notification integrations. A Secret joins the receivers named in its `amp.receiver` annotation, or every receiver without one; see [Kubernetes-Secret targets](../docs/ALERTMANAGER_COMPATIBILITY.md#kubernetes-secret-targets) for the format and which types map to which upstream integration.
 
 Files:
 - [k8s/pagerduty-secret-example.yaml](./k8s/pagerduty-secret-example.yaml)
@@ -43,7 +45,6 @@ Files:
 
 ## Related Paths
 
-- [pkg/core overview](../go-app/pkg/core/README.md)
 - [Repository README](../README.md)
 - [API compatibility notes](../docs/ALERTMANAGER_COMPATIBILITY.md)
 - [Contributing guide](../CONTRIBUTING.md)
