@@ -4,7 +4,7 @@ slug: p2-hygiene-bundle
 stream: Production Readiness
 type: tech-debt
 priority: medium
-status: active
+status: done
 created_at: 2026-11-14
 updated_at: 2026-11-14
 ---
@@ -45,14 +45,14 @@ updated_at: 2026-11-14
 
 ## Success Criteria
 
-- [ ] `ServiceMonitor` и `PrometheusRule` (AMP, PostgreSQL, Valkey) рендерятся, только если кластер отдаёт `monitoring.coreos.com/v1` или `monitoring.assumeCRDs: true`; render-тесты на оба случая; `NOTES.txt` сообщает, что мониторинг пропущен.
-- [ ] Guard ServiceMonitor на `webConfig` без кредов продолжает срабатывать, когда SM рендерится.
-- [ ] `release.yml` до логина в реестр проверяет `git merge-base --is-ancestor "$GITHUB_SHA" origin/main` (с `fetch-depth: 0`) и падает с `::error::` иначе.
-- [ ] `scripts/release-gate.sh` содержит шаг `go mod tidy -diff` (go-app) и он зелёный на текущем `main`.
-- [ ] Пробы Valkey: `REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli ping`, в рендере нет `-a $`; render-тест.
-- [ ] `values-dev.yaml` не задаёт `resources` и не дублирует дефолтные `monitoring`/`ingress`; `helm-dev` в release-gate зелёный.
-- [ ] `LLM-ERROR-BODY-CAP` сверён с кодом: закрыт как сделанный (с указанием коммита) или доделан.
-- [ ] README чарта, Known Gaps и `CHANGELOG.md` `[Unreleased]` отражают изменения.
+- [x] `ServiceMonitor` и `PrometheusRule` (AMP, PostgreSQL, Valkey) рендерятся, только если кластер отдаёт `monitoring.coreos.com/v1` или `monitoring.assumeCRDs: true`; render-тесты на оба случая; `NOTES.txt` сообщает, что мониторинг пропущен.
+- [x] Guard ServiceMonitor на `webConfig` без кредов продолжает срабатывать, когда SM рендерится.
+- [x] `release.yml` до логина в реестр проверяет `git merge-base --is-ancestor "$GITHUB_SHA" origin/main` (с `fetch-depth: 0`) и падает с `::error::` иначе.
+- [x] `scripts/release-gate.sh` содержит шаг `go mod tidy -diff` (go-app) и он зелёный на текущем `main`.
+- [x] Пробы Valkey: `REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli ping`, в рендере нет `-a $`; render-тест.
+- [x] `values-dev.yaml` не задаёт `resources` и не дублирует дефолтные `monitoring`/`ingress`; `helm-dev` в release-gate зелёный.
+- [x] `LLM-ERROR-BODY-CAP` сверён с кодом: закрыт как сделанный (с указанием коммита) или доделан.
+- [x] README чарта, Known Gaps и `CHANGELOG.md` `[Unreleased]` отражают изменения.
 
 ## Non-Goals
 

@@ -15,7 +15,6 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
-- [ ] **P2-HYGIENE-BUNDLE** — бандл P2-гигиены из `BACKLOG.md` § P2: `HELM-MONITORING-CRD-GATE`, `RELEASE-TAG-ON-MAIN-GUARD`, `GO-MOD-TIDY-CHECK`, `VALKEY-PROBE-ARGV-PASSWORD`, `HELM-VALUES-DEV-ALIGN`, `LLM-ERROR-BODY-CAP` (сверить с кодом). Ветка `bugfix/p2-hygiene-bundle`, `tasks/P2-HYGIENE-BUNDLE/`. Взят 2026-11-14.
 
 ## Queue
 
