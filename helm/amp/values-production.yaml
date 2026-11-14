@@ -179,8 +179,9 @@ publishingTargets:
 # ===============================
 monitoring:
   prometheusEnabled: true
-  # With webConfig.existingSecret set (see ingress below), the ServiceMonitor
-  # needs credentials or the render fails: set
+  # With webConfig.existingSecret set (see ingress below) and the
+  # prometheus-operator CRDs served, the ServiceMonitor needs credentials or
+  # the render fails: set
   # serviceMonitor.basicAuth.secretName (Secret with the plain username and
   # password, see values.yaml). Its Prometheus must also be listed in
   # networkPolicy.metricsScrapers below, or scrapes time out.

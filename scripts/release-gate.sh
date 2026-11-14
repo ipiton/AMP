@@ -77,6 +77,12 @@ step_build() {
   ( cd "$GO_APP_DIR" && go build ./... )
 }
 
+# go.mod/go.sum must already be what `go mod tidy` writes (GO-MOD-TIDY-CHECK):
+# -diff prints the would-be change and exits non-zero without touching files.
+step_mod_tidy() {
+  ( cd "$GO_APP_DIR" && go mod tidy -diff )
+}
+
 step_lint() {
   if ! command -v golangci-lint >/dev/null 2>&1; then
     log "golangci-lint not found on PATH"
@@ -198,8 +204,11 @@ step_helm_values() {
   fi
   # shellcheck disable=SC2086
   helm lint "$HELM_CHART_DIR" -f "$HELM_CHART_DIR/$values_file" $extra_sets || return 1
+  # helm lint sees no cluster CRDs, so it skips the prometheus-operator
+  # objects (HELM-MONITORING-CRD-GATE); the template pretends they are served,
+  # so the ServiceMonitor credentials guard and its placeholder stay exercised.
   # shellcheck disable=SC2086
-  helm template amp "$HELM_CHART_DIR" -f "$HELM_CHART_DIR/$values_file" $extra_sets >/dev/null
+  helm template amp "$HELM_CHART_DIR" --api-versions monitoring.coreos.com/v1 -f "$HELM_CHART_DIR/$values_file" $extra_sets >/dev/null
 }
 
 # PROD-RBAC-SCOPE (ADR-012): the chart grants exactly what the code calls --
@@ -333,6 +342,7 @@ step_amtool_compat() {
 }
 
 run_step "build" "go build ./... (go-app)" step_build
+run_step "mod-tidy" "go mod tidy -diff (go-app)" step_mod_tidy
 run_step "lint" "golangci-lint run (go-app)" step_lint
 run_step "test" "go test ./... -count=1 (go-app)" step_test
 run_step "upstream-core" "contract suites vs divergence baseline + amtool, upstream core" step_upstream_core

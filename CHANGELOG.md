@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **P2-HYGIENE-BUNDLE** (2026-11-14): the Valkey probes pass the password through `REDISCLI_AUTH` instead of `redis-cli -a $REDIS_PASSWORD`, so it no longer shows up in `ps` and `/proc/<pid>/cmdline`, and `redis-cli` stops warning on every probe (`VALKEY-PROBE-ARGV-PASSWORD`). A password with spaces still fails: the init container writes `requirepass` unquoted (`VALKEY-REQUIREPASS-QUOTING`). The release workflow publishes an image only for a tag whose commit is on `main` (`RELEASE-TAG-ON-MAIN-GUARD`).
+
+### Changed
+- **P2-HYGIENE-BUNDLE** (2026-11-14): the chart renders its ServiceMonitors and PrometheusRules only when the cluster serves `monitoring.coreos.com/v1`, so a default `helm install` on a cluster without prometheus-operator no longer fails with `no matches for kind "ServiceMonitor"`; `NOTES.txt` says when they were skipped (`HELM-MONITORING-CRD-GATE`). `values-dev.yaml` follows the chart defaults for resources (requests 100m/128Mi instead of 500m/512Mi), monitoring and ingress (`HELM-VALUES-DEV-ALIGN`). `scripts/release-gate.sh` fails on a `go-app/go.mod` that is not tidy (`GO-MOD-TIDY-CHECK`).
+
+### Breaking changes / migration notes
+- **P2-HYGIENE-BUNDLE**: `helm template` without access to a cluster (and without `--api-versions monitoring.coreos.com/v1`) no longer emits ServiceMonitors and PrometheusRules. If you render the chart that way and apply the output to a cluster with prometheus-operator, add `--api-versions monitoring.coreos.com/v1` or set `monitoring.assumeCRDs: true`. The same applies to kustomize `helmCharts` (set `apiVersions: [monitoring.coreos.com/v1]`); a pipeline that applies with `--prune` would otherwise delete the existing ServiceMonitors and PrometheusRules. `helm install`/`upgrade`, Argo CD and Flux see the cluster's CRDs and render as before.
+
 ### Added
 - **HELM-PROMRULE-LABELS** (2026-11-09): Helm `monitoring.prometheusRule.labels` adds labels to the chart's `PrometheusRule`s, so a Prometheus with a `ruleSelector` (kube-prometheus-stack: `release: <its release name>`) loads them; `monitoring.serviceMonitor.labels` also lands on the Valkey ServiceMonitor.
 

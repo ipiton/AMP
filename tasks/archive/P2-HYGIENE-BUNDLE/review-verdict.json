@@ -1,0 +1,9 @@
+{
+  "gate": "pass",
+  "reason": null,
+  "branch": "bugfix/p2-hygiene-bundle",
+  "commit": "5f0a5b0",
+  "reviewed_at": "2026-11-14",
+  "findings": { "blocker": 0, "major": 0, "minor": 6, "nit": 3 },
+  "open": { "blocker": 0, "major_without_disposition": 0 }
+}

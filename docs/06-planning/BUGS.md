@@ -34,12 +34,12 @@
 - **Refs:** `~/amp-audit/gate-runbook.log`, 2026-10-07.
 - **Status:** open
 
-### [low][Helm][~0.2d] MONITORING-CRD-DEFAULT
-- **Title:** дефолты чарта требуют CRD prometheus-operator
-- **Problem:** `monitoring.prometheusEnabled: true` по умолчанию, поэтому `helm install` с дефолтами рендерит `ServiceMonitor` (AMP и redis) и `PrometheusRule` redis. В кластере без CRD `monitoring.coreos.com` install падает на `no matches for kind "ServiceMonitor"`.
-- **Impact:** первый install в чистый кластер требует знать про `--set monitoring.prometheusEnabled=false`.
-- **Fix:** гейтить на `.Capabilities.APIVersions.Has "monitoring.coreos.com/v1"` или сменить дефолт на `false` (breaking для тех, кто на него полагается).
-- **Refs:** ADR-015; `tasks/archive/PROD-INGRESS-HARDENING/Spec.md` D7; 2026-10-01.
+### [low][Helm][~0.1d] VALKEY-REQUIREPASS-QUOTING
+- **Title:** пароль Valkey с пробелом или спецсимволами ломает старт Valkey
+- **Problem:** init-контейнер `templates/redis-statefulset.yaml` (`echo "requirepass $(cat /tmp/secret/password)" >> /data/redis.conf`) пишет пароль без кавычек и экранирования. С паролем `s3cr et` Valkey 8.1.10 не стартует: `FATAL CONFIG FILE ERROR ... wrong number of arguments`. Сгенерированный чартом пароль безопасен, проблема — со своим `valkey.password.existingSecret`.
+- **Impact:** под Valkey в CrashLoop при «сильном» пароле оператора; Valkey по умолчанию выключен (`valkey.enabled: false`).
+- **Fix:** писать `requirepass "<пароль>"` с экранированием `\` и `"` (формат redis.conf), либо передавать `--requirepass` через env в `command` sh с кавычками; render-тест + прогон на образе с паролем с пробелом/кавычкой.
+- **Refs:** `tasks/archive/P2-HYGIENE-BUNDLE/review-findings.md` F2; 2026-11-14.
 - **Status:** open
 
 ### [low][Helm][~0.25d] HELM-NAMESPACE-OVERRIDE-SPLIT
@@ -75,6 +75,14 @@
 - _(2026-11-08, UPSTREAM-CORE-REMOVAL)_ проверено по текущим шаблонам: дефект на месте — `postgresql-*.yaml` по-прежнему гейтятся только `postgresql.enabled`. Сторона AMP уже гейтится профилем: `DATABASE_PASSWORD` в `templates/statefulset.yaml` и блок `database` в `templates/amp-config.yaml` — только при `profile: standard`. Шаблона `deployment.yaml` больше нет.
 - **Fix:** гейт `and .Values.postgresql.enabled (eq .Values.profile "standard")` во всех `postgresql-*.yaml` (включая `secret.yaml`, ветку пароля PG) либо `fail` на `lite` + `postgresql.enabled`; render-тест.
 - **Refs:** `tasks/archive/PROD-POSTGRES-HA-DECISION/review-findings.md` R11; `tasks/archive/UPSTREAM-CORE-REMOVAL/review-findings.md` C11.
+- **Status:** open
+
+### [medium][Helm][~0.25d] PG-EXPORTER-NO-SERVICEMONITOR
+- **Title:** метрики встроенного PostgreSQL никто не скрейпит — правила `amp-postgres` слепые
+- **Problem:** у Service `<fullname>-postgres-exporter` только аннотации `prometheus.io/scrape|port|path` (`templates/postgresql-exporter-service.yaml`), а prometheus-operator их не читает; ServiceMonitor для exporter'а чарт не рендерит (AMP-ServiceMonitor выбирает только `component: application`). На пилоте (sema-prod, 2026-11-09…14) в Prometheus нет ни одной метрики `pg_*`, все 11 правил `PrometheusRule amp-postgres` не могут сработать — `PostgreSQLDown` молчит и при упавшем PG.
+- **Impact:** мониторинг встроенного PostgreSQL выглядит включённым, но не работает; находки `PG-ALERT-RULES-METRICS` на живом кластере даже не проявляются.
+- **Fix:** ServiceMonitor для exporter'а под `postgresql.exporter.enabled` + гейт `amp.monitoringCRDs`, `monitoring.serviceMonitor.labels`, порт `metrics`; NetworkPolicy PG пропускает `networkPolicy.metricsScrapers` на 9187; render-тест; проверка на k3s, что `pg_up` появился и правила вычисляются.
+- **Refs:** промежуточный срез пилота 2026-11-14 (`AMP-PILOT-WEEK-REVIEW`); связано с `PG-ALERT-RULES-METRICS`, BACKLOG `PG-MONITORING-CHECKS`.
 - **Status:** open
 
 ### [medium][Helm][~0.5d] PG-ALERT-RULES-METRICS

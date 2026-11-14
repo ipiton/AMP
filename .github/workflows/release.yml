@@ -38,6 +38,21 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # Full history and branches: the next step needs origin/main.
+          fetch-depth: 0
+      # Only a commit already on main is published: a v* tag pushed on a
+      # feature branch or a local commit would otherwise ship an image that
+      # never passed the main CI (RELEASE-TAG-ON-MAIN-GUARD). Before the
+      # registry login, so a refused tag never pushes; the job token itself
+      # carries packages: write from the first step (CI-SUPPLY-CHAIN).
+      - name: check tagged commit is on main
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::tag $TAG points at $GITHUB_SHA, which is not on main"
+            exit 1
+          fi
       # The chart pulls .Chart.AppVersion by default, so the tag must match
       # it: v0.1.0 and v0.1.0-rc.1 both require appVersion "0.1.0".
       - name: check tag matches Chart appVersion

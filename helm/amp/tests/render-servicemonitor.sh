@@ -23,6 +23,10 @@ trap 'rm -rf "${WORK_DIR}"' EXIT
 
 failures=0
 
+# render/assert_render_fails pretend the cluster serves the prometheus-operator
+# CRDs (HELM-MONITORING-CRD-GATE); the gate itself is checked without them.
+CRDS=(--api-versions monitoring.coreos.com/v1)
+
 pass() { printf '  ok   %s\n' "$1"; }
 fail() {
   printf '  FAIL %s\n' "$1" >&2
@@ -45,7 +49,7 @@ assert_render_fails() {
   shift 2
 
   local output
-  if output="$(helm template amp "${CHART_DIR}" "$@" 2>&1)"; then
+  if output="$(helm template amp "${CHART_DIR}" "${CRDS[@]}" "$@" 2>&1)"; then
     fail "${description} (render succeeded, expected failure)"
     return
   fi
@@ -61,7 +65,7 @@ assert_render_fails() {
 render() {
   local name="$1"
   shift
-  if ! helm template amp "${CHART_DIR}" "$@" >"${WORK_DIR}/${name}.yaml" 2>"${WORK_DIR}/${name}.err"; then
+  if ! helm template amp "${CHART_DIR}" "${CRDS[@]}" "$@" >"${WORK_DIR}/${name}.yaml" 2>"${WORK_DIR}/${name}.err"; then
     fail "${name}: render failed: $(cat "${WORK_DIR}/${name}.err")"
     : >"${WORK_DIR}/${name}.yaml"
   fi
@@ -217,6 +221,47 @@ assert_contains "${WORK_DIR}/reuse-sm.yaml" "interval: 30s" "default interval"
 assert_contains "${WORK_DIR}/reuse-sm.yaml" "scrapeTimeout: 10s" "default scrape timeout"
 assert_render_fails "...and the credentials guard still runs" "${NO_CREDS}" \
   --set monitoring.serviceMonitor=null --set webConfig.existingSecret=sm-test-web
+
+echo "gated on the prometheus-operator CRDs (HELM-MONITORING-CRD-GATE):"
+# No --api-versions: what helm sees on a cluster without the CRDs.
+ALL_MON=(--set valkey.enabled=true)
+nocrd_kinds() { { grep -E '^kind: (ServiceMonitor|PrometheusRule)$' "$1" || true; } | wc -l | tr -d ' '; }
+if helm template amp "${CHART_DIR}" "${ALL_MON[@]}" >"${WORK_DIR}/nocrd.yaml" 2>"${WORK_DIR}/nocrd.err"; then
+  got="$(nocrd_kinds "${WORK_DIR}/nocrd.yaml")"
+  if [ "${got}" = "0" ]; then pass "no CRDs: no ServiceMonitor/PrometheusRule"; else fail "no CRDs: got ${got} monitoring objects"; fi
+  assert_contains "${WORK_DIR}/nocrd.yaml" "kind: StatefulSet" "no CRDs: the rest of the chart still renders"
+else
+  fail "no CRDs: render failed: $(cat "${WORK_DIR}/nocrd.err")"
+fi
+# With the CRDs: AMP + Valkey ServiceMonitors, PostgreSQL + Valkey rules.
+render withcrd "${ALL_MON[@]}"
+got="$(nocrd_kinds "${WORK_DIR}/withcrd.yaml")"
+if [ "${got}" = "4" ]; then pass "CRDs served: 4 monitoring objects"; else fail "CRDs served: got ${got} monitoring objects, want 4"; fi
+if helm template amp "${CHART_DIR}" "${ALL_MON[@]}" --set monitoring.assumeCRDs=true >"${WORK_DIR}/assume.yaml" 2>"${WORK_DIR}/assume.err"; then
+  got="$(nocrd_kinds "${WORK_DIR}/assume.yaml")"
+  if [ "${got}" = "4" ]; then pass "assumeCRDs: 4 monitoring objects without --api-versions"; else fail "assumeCRDs: got ${got}, want 4"; fi
+else
+  fail "assumeCRDs: render failed: $(cat "${WORK_DIR}/assume.err")"
+fi
+# Without the CRDs there is no ServiceMonitor, so nothing for the guard to protect.
+if helm template amp "${CHART_DIR}" --set webConfig.existingSecret=sm-test-web >/dev/null 2>"${WORK_DIR}/nocrd-auth.err"; then
+  pass "no CRDs: webConfig without metrics credentials renders"
+else
+  fail "no CRDs: webConfig render failed: $(cat "${WORK_DIR}/nocrd-auth.err")"
+fi
+# NOTES.txt says why the objects are missing (helm install --dry-run renders it;
+# helm template does not).
+notes() { helm install amp "${CHART_DIR}" --dry-run=client "$@" 2>&1 | sed -n '/^NOTES:/,$p'; }
+SKIPPED="ServiceMonitor/PrometheusRules skipped"
+notes >"${WORK_DIR}/notes-nocrd.txt"
+assert_contains "${WORK_DIR}/notes-nocrd.txt" "${SKIPPED}" "NOTES: skip explained without CRDs"
+# A client dry-run takes no --api-versions; assumeCRDs is the same branch of
+# amp.monitoringCRDs.
+notes --set monitoring.assumeCRDs=true >"${WORK_DIR}/notes-crd.txt"
+assert_absent "${WORK_DIR}/notes-crd.txt" "${SKIPPED}" "NOTES: silent with assumeCRDs"
+assert_contains "${WORK_DIR}/notes-crd.txt" "NOTES:" "NOTES: rendered at all"
+notes --set monitoring.prometheusEnabled=false >"${WORK_DIR}/notes-off.txt"
+assert_absent "${WORK_DIR}/notes-off.txt" "${SKIPPED}" "NOTES: silent with prometheusEnabled=false"
 
 if [ "${failures}" -ne 0 ]; then
   printf '\n%d assertion(s) failed\n' "${failures}" >&2

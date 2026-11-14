@@ -14,7 +14,7 @@ The breaking changes against earlier chart versions are listed in `CHANGELOG.md`
 
 ## Quick Start
 
-> **Read before installing.** The chart defaults start. LLM is off by default (`llm.enabled: false`); to turn it on, set `llm.enabled: true` together with `llm.apiKey` (or `externalSecrets.enabled` with `llm_api_key` in the store) — without a key the render fails instead of leaving a pod in `CreateContainerConfigError`. The bundled PostgreSQL has no TLS, so with it the chart writes `ssl_mode: disable` plus `allow_insecure_ssl_in_production: true` into the AMP configuration: under `environment: production` (the default) AMP then accepts the unencrypted in-cluster connection. The chart never sets that flag for an external database, and AMP still rejects `sslmode=disable` in production without it. External PostgreSQL: set `postgresql.enabled: false` and `externalDatabase.*`, with the password in a Secret you create (see [PostgreSQL](#postgresql)). With `postgresql.enabled: false` and no database configured, the render fails. `values-production.yaml` uses an external database and does not render until `externalDatabase` is filled in. The defaults target one node: one replica, about 210m CPU / 416Mi requested in total (see [Sizing](#sizing)). The image is `ghcr.io/ipiton/amp:<appVersion>` from tagged releases (see [CI And Image Publishing](../../docs/CI.md)). **The defaults render a `ServiceMonitor` and `PrometheusRule`s, which need the prometheus-operator CRDs** (kube-prometheus-stack): on a cluster without them `helm install` fails with `no matches for kind "ServiceMonitor"`; set `monitoring.prometheusEnabled: false` there. Set your own `postgresql.password` for the bundled PostgreSQL: the default is published in this repository.
+> **Read before installing.** The chart defaults start. LLM is off by default (`llm.enabled: false`); to turn it on, set `llm.enabled: true` together with `llm.apiKey` (or `externalSecrets.enabled` with `llm_api_key` in the store) — without a key the render fails instead of leaving a pod in `CreateContainerConfigError`. The bundled PostgreSQL has no TLS, so with it the chart writes `ssl_mode: disable` plus `allow_insecure_ssl_in_production: true` into the AMP configuration: under `environment: production` (the default) AMP then accepts the unencrypted in-cluster connection. The chart never sets that flag for an external database, and AMP still rejects `sslmode=disable` in production without it. External PostgreSQL: set `postgresql.enabled: false` and `externalDatabase.*`, with the password in a Secret you create (see [PostgreSQL](#postgresql)). With `postgresql.enabled: false` and no database configured, the render fails. `values-production.yaml` uses an external database and does not render until `externalDatabase` is filled in. The defaults target one node: one replica, about 210m CPU / 416Mi requested in total (see [Sizing](#sizing)). The image is `ghcr.io/ipiton/amp:<appVersion>` from tagged releases (see [CI And Image Publishing](../../docs/CI.md)). The chart's `ServiceMonitor`s and `PrometheusRule`s render only on a cluster that serves the prometheus-operator CRDs (kube-prometheus-stack); elsewhere they are skipped. With `helm template` and no cluster, see `monitoring.assumeCRDs` under [Network Exposure](#network-exposure). Set your own `postgresql.password` for the bundled PostgreSQL: the default is published in this repository.
 
 ```yaml
 # my-values.yaml — standard profile, one replica (the defaults)
@@ -376,15 +376,16 @@ networkPolicy:
 
 AMP pods carry `app.kubernetes.io/component: application` (the postgres/redis pods share the chart's selector labels and have their own component; the headless Service has `cluster`), so external policies can select them too.
 
-**ServiceMonitor.** Rendered when `monitoring.prometheusEnabled` and `monitoring.serviceMonitor.enabled` are both true (default); it needs the prometheus-operator CRDs. It scrapes `/metrics` (under the `alertmanager.externalURL` path) on the `web` port of every AMP pod behind the Service `<fullname>`, the core's `alertmanager_*` metrics included.
+**ServiceMonitor.** Rendered when `monitoring.prometheusEnabled` and `monitoring.serviceMonitor.enabled` are both true (default) and the cluster serves the prometheus-operator CRDs (`monitoring.coreos.com/v1`). Without the CRDs every ServiceMonitor and PrometheusRule of the chart is skipped and `NOTES.txt` says so, instead of failing the install. `helm template` without a cluster does not see the CRDs: pass `--api-versions monitoring.coreos.com/v1` or set `monitoring.assumeCRDs: true` (Argo CD and Flux pass the cluster's API versions themselves). It scrapes `/metrics` (under the `alertmanager.externalURL` path) on the `web` port of every AMP pod behind the Service `<fullname>`, the core's `alertmanager_*` metrics included.
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
+| `monitoring.assumeCRDs` | render ServiceMonitors/PrometheusRules even when the prometheus-operator CRDs are not detected (`helm template` without a cluster) | `false` |
 | `monitoring.serviceMonitor.enabled` | render the AMP ServiceMonitor | `true` |
 | `monitoring.serviceMonitor.labels` | extra labels, e.g. what your Prometheus `serviceMonitorSelector` matches; also on the Valkey ServiceMonitor | `{}` |
 | `monitoring.prometheusRule.labels` | extra labels on the chart's `PrometheusRule`s (PostgreSQL, Valkey), e.g. what your Prometheus `ruleSelector` matches | `{}` |
 | `monitoring.serviceMonitor.interval` / `scrapeTimeout` | scrape timing | `30s` / `10s` |
-| `monitoring.serviceMonitor.basicAuth.secretName` | Secret with the plain username/password; **required** with `webConfig.existingSecret` | `""` |
+| `monitoring.serviceMonitor.basicAuth.secretName` | Secret with the plain username/password; **required** with `webConfig.existingSecret` whenever the ServiceMonitor renders (CRDs served or `monitoring.assumeCRDs`) | `""` |
 | `monitoring.serviceMonitor.basicAuth.usernameKey` / `passwordKey` | keys in that Secret | `username` / `password` |
 
 With web auth on, `/metrics` needs credentials and the render fails without them. Create the Secret in the namespace AMP runs in (`namespace`, by default the release namespace) from the plain password of a `web-config.yml` user (not its bcrypt hash):
@@ -398,7 +399,7 @@ helm upgrade amp ./helm/amp --reuse-values \
 
 With a NetworkPolicy, list that Prometheus in `networkPolicy.metricsScrapers` (or `alertSenders`), or its scrapes time out.
 
-**`values-production.yaml`** enables the Ingress and the NetworkPolicy and ships none of the above, so it renders only once you set: `webConfig.existingSecret` (or `ingress.externalAuth`), `monitoring.serviceMonitor.basicAuth.secretName` (with `webConfig`), and at least one NetworkPolicy source. The render reports one missing setting at a time.
+**`values-production.yaml`** enables the Ingress and the NetworkPolicy and ships none of the above, so it renders only once you set: `webConfig.existingSecret` (or `ingress.externalAuth`), `monitoring.serviceMonitor.basicAuth.secretName` (with `webConfig`, on a cluster with the prometheus-operator CRDs), and at least one NetworkPolicy source. The render reports one missing setting at a time.
 
 ## Alertmanager Compatibility
 

@@ -69,7 +69,9 @@ doc_line() {
 render() {
   local name="$1"
   shift
-  if helm template amp "${CHART_DIR}" "$@" >"${WORK_DIR}/${name}.yaml" 2>"${WORK_DIR}/${name}.err"; then
+  # The cluster serves the prometheus-operator CRDs: the monitoring objects
+  # asserted below render only then (HELM-MONITORING-CRD-GATE).
+  if helm template amp "${CHART_DIR}" --api-versions monitoring.coreos.com/v1 "$@" >"${WORK_DIR}/${name}.yaml" 2>"${WORK_DIR}/${name}.err"; then
     pass "${name}: renders"
   else
     fail "${name}: render failed: $(cat "${WORK_DIR}/${name}.err")"
@@ -155,6 +157,10 @@ if [ "${got}" = "270m/512Mi" ]; then pass "valkey: requests total 270m/512Mi"; e
 assert_count "${f}" "image: valkey/valkey:8.1.10-alpine" 1 "valkey: cache image valkey/valkey:8.1.10-alpine"
 assert_count "${f}" "image: redis:" 0 "valkey: no redis image"
 assert_count "${f}" "redis-pre-valkey-" 1 "valkey: config-init moves Redis >= 7.4 data"
+# VALKEY-PROBE-ARGV-PASSWORD: the password reaches redis-cli through the
+# environment, never argv.
+assert_count "${f}" 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli ping' 3 "valkey: liveness/readiness/startup authenticate via REDISCLI_AUTH"
+assert_count "${f}" '-a $' 0 "valkey: no password in redis-cli argv"
 
 echo "T3 lite and production:"
 render lite --set profile=lite

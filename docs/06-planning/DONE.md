@@ -18,6 +18,16 @@ grep -rn "SLUG" docs/06-planning/DONE.md docs/06-planning/archive/DONE-*.md
 
 ## 2026-11
 
+- 2026-11-14 — (Delivery / Production Readiness) **P2-HYGIENE-BUNDLE** — бандл P2-гигиены; ветка `bugfix/p2-hygiene-bundle`, `tasks/archive/P2-HYGIENE-BUNDLE/`. Full (`S X R`).
+  - **HELM-MONITORING-CRD-GATE:** ServiceMonitor/PrometheusRule (AMP, PostgreSQL, Valkey) рендерятся только при `monitoring.coreos.com/v1` в кластере или `monitoring.assumeCRDs: true`; без CRD `helm install` с дефолтами больше не падает, `NOTES.txt` объясняет пропуск. Закрывает и BUGS `MONITORING-CRD-DEFAULT`. Breaking для `helm template` без кластера — migration note в CHANGELOG.
+  - **RELEASE-TAG-ON-MAIN-GUARD:** `release.yml` до login проверяет `git merge-base --is-ancestor "$GITHUB_SHA" origin/main` (`fetch-depth: 0`); проверено на клоне.
+  - **GO-MOD-TIDY-CHECK:** шаг `mod-tidy` (`go mod tidy -diff`) в `release-gate.sh`.
+  - **VALKEY-PROBE-ARGV-PASSWORD:** пробы через `REDISCLI_AUTH`, проверено на `valkey/valkey:8.1.10-alpine`; render-тест «нет `-a $`».
+  - **HELM-VALUES-DEV-ALIGN:** `values-dev.yaml` без `resources`/`monitoring`/`ingress` — дефолты чарта.
+  - **LLM-ERROR-BODY-CAP:** уже сделано в `0c48423` (`INVESTIGATION-SAFETY-RELIABILITY`, 2026-10-28), запись закрыта без кода.
+  - **Проверка:** render-тесты (новые — в `render-servicemonitor.sh`, `render-single-node.sh`), deep-review `pass` (F1–F9: 6 исправлено, F2 частично), `scripts/release-gate.sh` PASS 13/13 на `7ca987a`.
+  - **Хвосты:** BACKLOG `HELM-MONITORING-CRD-PER-KIND` (F3, F7); BUGS `VALKEY-REQUIREPASS-QUOTING` (F2), `PG-EXPORTER-NO-SERVICEMONITOR` (найдено срезом пилота 2026-11-14).
+
 - 2026-11-09 — (Delivery / Helm) **HELM-PROMRULE-LABELS** — свои метки на `PrometheusRule` чарта; ветка `feature/helm-promrule-labels`. Lightweight.
   - **Чарт:** `monitoring.prometheusRule.labels` на `amp-postgres` и `amp-redis-alerts`, `monitoring.serviceMonitor.labels` теперь и на Valkey-ServiceMonitor; nil-safe для `--reuse-values` со старых values. Render-тест в `render-servicemonitor.sh` (метки на трёх объектах, без них по умолчанию, рендер без `monitoring.prometheusRule`). `scripts/release-gate.sh` PASS.
   - **На k3s владельца:** ревизия 2 релиза `amp` с `release: kube-prometheus-stack` — Prometheus загрузил группу `amp-postgres` (11 правил).

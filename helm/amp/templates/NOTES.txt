@@ -35,6 +35,10 @@ External URL: {{ include "amp.externalURL" . }}
 {{- else }}
 ℹ️  No HTTP authentication (webConfig.existingSecret)
 {{- end }}
+{{- if and (dig "prometheusEnabled" false (.Values.monitoring | default dict)) (not (include "amp.monitoringCRDs" .)) }}
+ℹ️  ServiceMonitor/PrometheusRules skipped: the cluster does not serve monitoring.coreos.com/v1
+   (prometheus-operator CRDs). Install the CRDs and upgrade, or set monitoring.assumeCRDs=true.
+{{- end }}
 
 {{- if eq .Values.profile "lite" }}
 
