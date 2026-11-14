@@ -1,4 +1,4 @@
-{{- if and (eq .Values.profile "standard") .Values.valkey.enabled .Values.monitoring.prometheusEnabled }}
+{{- if and (eq .Values.profile "standard") .Values.valkey.enabled .Values.monitoring.prometheusEnabled (include "amp.monitoringCRDs" .) }}
 {{/*
 PrometheusRule CRD for Redis Alerting
 10 alerting rules: 5 critical + 5 warning

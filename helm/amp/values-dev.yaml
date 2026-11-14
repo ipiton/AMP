@@ -1,5 +1,9 @@
 # Development-oriented values overrides for AMP with optional LLM settings
 # Usage: helm install amp ./helm/amp -f values-dev.yaml
+#
+# Resources, monitoring and ingress follow the chart defaults
+# (HELM-VALUES-DEV-ALIGN); the postgresql and llm blocks restate defaults on
+# purpose, as the place to fill in for a local run.
 
 # ===============================
 # Application Configuration
@@ -13,17 +17,6 @@ image:
   repository: ghcr.io/ipiton/amp
   tag: "latest"
   pullPolicy: Always
-
-# ===============================
-# Resource Configuration (Development)
-# ===============================
-resources:
-  limits:
-    cpu: 1000m
-    memory: 1Gi
-  requests:
-    cpu: 500m
-    memory: 512Mi
 
 # ===============================
 # Database Configuration (bundled PostgreSQL, dev/pilot only — ADR-016)
@@ -60,18 +53,6 @@ publishingTargets:
     filterConfig:
       severity: ["critical", "warning", "info"]
       excludeNoise: false
-
-# ===============================
-# Monitoring Configuration
-# ===============================
-monitoring:
-  prometheusEnabled: true
-
-# ===============================
-# Ingress Configuration (Disabled for development)
-# ===============================
-ingress:
-  enabled: false
 
 # ===============================
 # Service Configuration (NodePort for development)

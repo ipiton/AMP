@@ -1,4 +1,4 @@
-{{- if and .Values.postgresql.enabled .Values.postgresql.monitoring.prometheusRules.enabled }}
+{{- if and .Values.postgresql.enabled .Values.postgresql.monitoring.prometheusRules.enabled (include "amp.monitoringCRDs" .) }}
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:

@@ -183,3 +183,14 @@ app.kubernetes.io/component: application
 {{- define "amp.discoveryEnabled" -}}
 {{- if and (eq .Values.profile "standard") .Values.publishing.enabled }}true{{ end }}
 {{- end }}
+
+{{/*
+"true" when prometheus-operator objects (ServiceMonitor, PrometheusRule) can be
+applied: the cluster serves monitoring.coreos.com/v1, or monitoring.assumeCRDs
+says so for a render without a cluster (helm template without --api-versions).
+Without it a default install on a cluster without the CRDs fails with
+`no matches for kind "ServiceMonitor"` (HELM-MONITORING-CRD-GATE).
+*/}}
+{{- define "amp.monitoringCRDs" -}}
+{{- if or (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") (dig "assumeCRDs" false (.Values.monitoring | default dict)) }}true{{ end }}
+{{- end }}

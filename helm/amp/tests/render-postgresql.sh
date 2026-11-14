@@ -68,7 +68,9 @@ doc_line() {
 render() {
   local name="$1"
   shift
-  if helm template amp "${CHART_DIR}" "$@" >"${WORK_DIR}/${name}.yaml" 2>"${WORK_DIR}/${name}.err"; then
+  # The cluster serves the prometheus-operator CRDs: the monitoring objects
+  # asserted below render only then (HELM-MONITORING-CRD-GATE).
+  if helm template amp "${CHART_DIR}" --api-versions monitoring.coreos.com/v1 "$@" >"${WORK_DIR}/${name}.yaml" 2>"${WORK_DIR}/${name}.err"; then
     pass "${name}: renders"
   else
     fail "${name}: render failed: $(cat "${WORK_DIR}/${name}.err")"

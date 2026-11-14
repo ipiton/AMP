@@ -166,6 +166,9 @@ spec:
         resources:
           {{- toYaml .Values.valkey.resources | nindent 10 }}
 
+        # Probes pass the password through REDISCLI_AUTH, not the -a flag: argv
+        # is visible in ps and /proc/<pid>/cmdline, and the unquoted variable
+        # split a password with spaces (VALKEY-PROBE-ARGV-PASSWORD).
         # Liveness Probe
         # Ensures Redis process is healthy and responsive
         livenessProbe:
@@ -173,7 +176,7 @@ spec:
             command:
             - sh
             - -c
-            - redis-cli -a $REDIS_PASSWORD ping | grep PONG
+            - REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli ping | grep PONG
           initialDelaySeconds: 30
           periodSeconds: 10
           timeoutSeconds: 5
@@ -186,7 +189,7 @@ spec:
             command:
             - sh
             - -c
-            - redis-cli -a $REDIS_PASSWORD ping | grep PONG
+            - REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli ping | grep PONG
           initialDelaySeconds: 5
           periodSeconds: 5
           timeoutSeconds: 3
@@ -199,7 +202,7 @@ spec:
             command:
             - sh
             - -c
-            - redis-cli -a $REDIS_PASSWORD ping | grep PONG
+            - REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli ping | grep PONG
           initialDelaySeconds: 10
           periodSeconds: 5
           timeoutSeconds: 3

@@ -536,6 +536,12 @@ investigation:
 # ===============================
 monitoring:
   prometheusEnabled: true
+  # ServiceMonitors and PrometheusRules render only when the cluster serves
+  # monitoring.coreos.com/v1 (prometheus-operator CRDs); otherwise they are
+  # skipped and NOTES.txt says so. `helm template` without a cluster does not
+  # see the CRDs: pass --api-versions monitoring.coreos.com/v1 or set this to
+  # true. Argo CD and Flux pass the cluster's API versions themselves.
+  assumeCRDs: false
   # ServiceMonitor for AMP itself (prometheus-operator). Rendered only when
   # prometheusEnabled is also true. Scrapes /metrics on the `web` port of
   # every pod.

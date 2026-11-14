@@ -4,7 +4,7 @@ ServiceMonitor -- and run the credentials guard -- not silently drop both. */ -}
 {{- $mon := .Values.monitoring | default dict }}
 {{- $sm := $mon.serviceMonitor | default dict }}
 {{- $auth := $sm.basicAuth | default dict }}
-{{- if and $mon.prometheusEnabled (dig "enabled" true $sm) }}
+{{- if and $mon.prometheusEnabled (dig "enabled" true $sm) (include "amp.monitoringCRDs" .) }}
 {{- /* PROD-INGRESS-HARDENING (ADR-015): with web auth on, /metrics answers
 401 to a scrape without credentials -- a failure visible only as empty graphs. */ -}}
 {{- if and .Values.webConfig.existingSecret (not $auth.secretName) }}

@@ -1,4 +1,4 @@
-{{- if and (eq .Values.profile "standard") .Values.valkey.enabled .Values.monitoring.prometheusEnabled }}
+{{- if and (eq .Values.profile "standard") .Values.valkey.enabled .Values.monitoring.prometheusEnabled (include "amp.monitoringCRDs" .) }}
 {{/*
 ServiceMonitor CRD for Prometheus Operator
 Enables auto-discovery and scraping of Redis metrics from redis-exporter sidecar
