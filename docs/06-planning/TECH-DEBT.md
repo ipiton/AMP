@@ -46,7 +46,7 @@
 
 ### [low][Supply chain][~0.25d] IMAGE-BASE-DIGEST-PIN
 - **Title:** базовые образы `Dockerfile` закреплены тегом, не digest
-- **Problem:** `golang:1.27.3-alpine` и `alpine:3.24` (`Dockerfile:7`, `:47`) — перезаписываемые теги; публичный образ `ghcr.io/ipiton/amp` собирается из того, что лежит под тегом в момент сборки.
+- **Problem:** `golang:1.27.4-alpine` и `alpine:3.24` (`Dockerfile:7`, `:47`) — перезаписываемые теги; публичный образ `ghcr.io/ipiton/amp` собирается из того, что лежит под тегом в момент сборки.
 - **Impact:** воспроизводимость и supply chain публичного образа; Dependabot/Renovate для digest не настроен.
 - **Fix:** `FROM image:tag@sha256:...` и обновление digest через Renovate/Dependabot (`docker` ecosystem).
 - **Refs:** pre-release review `PROD-RELEASE-V010` F10 (`tasks/archive/PROD-RELEASE-V010/review-findings.md`).

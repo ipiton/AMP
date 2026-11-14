@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
+- **PROD-DEPS-GO-1274** (2026-11-14): Go toolchain bumped from `go1.27.3` to `go1.27.4` to fix GO-2026-6859 (`net/http`: an HTTP/1 server could crash on a header race in `MaxBytesReader`; fixed in `go1.27.4`), which turned the `govulncheck` CI job red on `main`. The image builder now uses `golang:1.27.4-alpine`. No code or configuration changes; `govulncheck` reports no reachable vulnerabilities.
 - **P2-HYGIENE-BUNDLE** (2026-11-14): the Valkey probes pass the password through `REDISCLI_AUTH` instead of `redis-cli -a $REDIS_PASSWORD`, so it no longer shows up in `ps` and `/proc/<pid>/cmdline`, and `redis-cli` stops warning on every probe (`VALKEY-PROBE-ARGV-PASSWORD`). A password with spaces still fails: the init container writes `requirepass` unquoted (`VALKEY-REQUIREPASS-QUOTING`). The release workflow publishes an image only for a tag whose commit is on `main` (`RELEASE-TAG-ON-MAIN-GUARD`).
 
 ### Changed

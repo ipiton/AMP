@@ -18,6 +18,11 @@ grep -rn "SLUG" docs/06-planning/DONE.md docs/06-planning/archive/DONE-*.md
 
 ## 2026-11
 
+- 2026-11-14 — (Security / Deps) **PROD-DEPS-GO-1274** — Go toolchain `go1.27.3` → `go1.27.4`: закрыта GO-2026-6859 (`net/http`, падение HTTP/1-сервера на гонке заголовков в `MaxBytesReader`), из-за которой `govulncheck` на `main` был красным (run 43636593602). Lightweight, ветка `bugfix/go-1274-govuln`.
+  - **Версии:** `toolchain go1.27.4` в `go-app/go.mod` (`go 1.26.0` не тронут), builder — `golang:1.27.4-alpine`, комментарий в `ci.yml`, `docs/CI.md`, пример в TECH-DEBT. Go-код не менялся.
+  - **Карантин:** go1.27.4 в `proxy.golang.org` с 2026-11-02 (12 дней) — проходит 7-дневный карантин; тег `golang:1.27.4-alpine` последний раз пересобран 2026-11-10 (штатная пересборка официального образа).
+  - **Проверка:** `govulncheck@v1.8.0` на `go1.27.4` — 0 достижимых, 3 на уровне модулей без вызовов; `scripts/release-gate.sh` (`GOTOOLCHAIN=go1.27.4`) `RESULT: PASS` 13/13 с первого прогона.
+
 - 2026-11-14 — (Delivery / Production Readiness) **P2-HYGIENE-BUNDLE** — бандл P2-гигиены; ветка `bugfix/p2-hygiene-bundle`, `tasks/archive/P2-HYGIENE-BUNDLE/`. Full (`S X R`).
   - **HELM-MONITORING-CRD-GATE:** ServiceMonitor/PrometheusRule (AMP, PostgreSQL, Valkey) рендерятся только при `monitoring.coreos.com/v1` в кластере или `monitoring.assumeCRDs: true`; без CRD `helm install` с дефолтами больше не падает, `NOTES.txt` объясняет пропуск. Закрывает и BUGS `MONITORING-CRD-DEFAULT`. Breaking для `helm template` без кластера — migration note в CHANGELOG.
   - **RELEASE-TAG-ON-MAIN-GUARD:** `release.yml` до login проверяет `git merge-base --is-ancestor "$GITHUB_SHA" origin/main` (`fetch-depth: 0`); проверено на клоне.
