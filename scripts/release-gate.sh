@@ -204,8 +204,11 @@ step_helm_values() {
   fi
   # shellcheck disable=SC2086
   helm lint "$HELM_CHART_DIR" -f "$HELM_CHART_DIR/$values_file" $extra_sets || return 1
+  # helm lint sees no cluster CRDs, so it skips the prometheus-operator
+  # objects (HELM-MONITORING-CRD-GATE); the template pretends they are served,
+  # so the ServiceMonitor credentials guard and its placeholder stay exercised.
   # shellcheck disable=SC2086
-  helm template amp "$HELM_CHART_DIR" -f "$HELM_CHART_DIR/$values_file" $extra_sets >/dev/null
+  helm template amp "$HELM_CHART_DIR" --api-versions monitoring.coreos.com/v1 -f "$HELM_CHART_DIR/$values_file" $extra_sets >/dev/null
 }
 
 # PROD-RBAC-SCOPE (ADR-012): the chart grants exactly what the code calls --

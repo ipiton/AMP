@@ -43,7 +43,8 @@ jobs:
       # Only a commit already on main is published: a v* tag pushed on a
       # feature branch or a local commit would otherwise ship an image that
       # never passed the main CI (RELEASE-TAG-ON-MAIN-GUARD). Before the
-      # registry login, so a refused tag never holds the push token.
+      # registry login, so a refused tag never pushes; the job token itself
+      # carries packages: write from the first step (CI-SUPPLY-CHAIN).
       - name: check tagged commit is on main
         env:
           TAG: ${{ github.ref_name }}

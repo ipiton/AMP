@@ -385,7 +385,7 @@ AMP pods carry `app.kubernetes.io/component: application` (the postgres/redis po
 | `monitoring.serviceMonitor.labels` | extra labels, e.g. what your Prometheus `serviceMonitorSelector` matches; also on the Valkey ServiceMonitor | `{}` |
 | `monitoring.prometheusRule.labels` | extra labels on the chart's `PrometheusRule`s (PostgreSQL, Valkey), e.g. what your Prometheus `ruleSelector` matches | `{}` |
 | `monitoring.serviceMonitor.interval` / `scrapeTimeout` | scrape timing | `30s` / `10s` |
-| `monitoring.serviceMonitor.basicAuth.secretName` | Secret with the plain username/password; **required** with `webConfig.existingSecret` | `""` |
+| `monitoring.serviceMonitor.basicAuth.secretName` | Secret with the plain username/password; **required** with `webConfig.existingSecret` whenever the ServiceMonitor renders (CRDs served or `monitoring.assumeCRDs`) | `""` |
 | `monitoring.serviceMonitor.basicAuth.usernameKey` / `passwordKey` | keys in that Secret | `username` / `password` |
 
 With web auth on, `/metrics` needs credentials and the render fails without them. Create the Secret in the namespace AMP runs in (`namespace`, by default the release namespace) from the plain password of a `web-config.yml` user (not its bcrypt hash):
@@ -399,7 +399,7 @@ helm upgrade amp ./helm/amp --reuse-values \
 
 With a NetworkPolicy, list that Prometheus in `networkPolicy.metricsScrapers` (or `alertSenders`), or its scrapes time out.
 
-**`values-production.yaml`** enables the Ingress and the NetworkPolicy and ships none of the above, so it renders only once you set: `webConfig.existingSecret` (or `ingress.externalAuth`), `monitoring.serviceMonitor.basicAuth.secretName` (with `webConfig`), and at least one NetworkPolicy source. The render reports one missing setting at a time.
+**`values-production.yaml`** enables the Ingress and the NetworkPolicy and ships none of the above, so it renders only once you set: `webConfig.existingSecret` (or `ingress.externalAuth`), `monitoring.serviceMonitor.basicAuth.secretName` (with `webConfig`, on a cluster with the prometheus-operator CRDs), and at least one NetworkPolicy source. The render reports one missing setting at a time.
 
 ## Alertmanager Compatibility
 
