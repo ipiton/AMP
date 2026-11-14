@@ -15,6 +15,8 @@ Queue и WIP — источник правды для выбора задачи.
 
 ## WIP
 
+- [ ] **P2-HYGIENE-BUNDLE** — бандл P2-гигиены из `BACKLOG.md` § P2: `HELM-MONITORING-CRD-GATE`, `RELEASE-TAG-ON-MAIN-GUARD`, `GO-MOD-TIDY-CHECK`, `VALKEY-PROBE-ARGV-PASSWORD`, `HELM-VALUES-DEV-ALIGN`, `LLM-ERROR-BODY-CAP` (сверить с кодом). Ветка `bugfix/p2-hygiene-bundle`, `tasks/P2-HYGIENE-BUNDLE/`. Взят 2026-11-14.
+
 ## Queue
 
 > Сначала — P0 из `BACKLOG.md` § «Production Readiness», по порядку (правило «Прод-блокеры первыми»); открытых P0 нет: `PROD-RELEASE-V010` закрыт 2026-11-09 (`v0.1.0`). Пересинхронизировано 2026-10-07 по аудиту 2026-10-06; `PROD-DEPS-NET-HTTP2` закрыт 2026-10-16, `HELM-EXTERNAL-DATABASE` закрыт 2026-10-16; `PG-CONFIG-FIX` закрыт 2026-10-18; `PROD-POSTGRES-HA-DECISION` закрыт 2026-10-15; `HELM-SINGLE-NODE-DEFAULTS` закрыт 2026-10-19. `AMP-CACHE-NOAUTH` закрыт 2026-10-20. `SLACK-WEBHOOK-PLAIN-OK-RESPONSE` закрыт 2026-10-20.
