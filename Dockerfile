@@ -4,7 +4,7 @@
 # (TARGETOS/TARGETARCH, set by buildx per --platform): a multi-arch build
 # then compiles Go natively instead of under QEMU emulation. The Go patch
 # version matches the `toolchain` line in go-app/go.mod -- bump them together.
-FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.4-alpine AS builder
 
 RUN apk add --no-cache git make ca-certificates
 
@@ -45,7 +45,7 @@ RUN UPSTREAM_VERSION="$(go list -m -f '{{if .Replace}}{{.Replace.Version}}{{else
     -o amp-upstream ./cmd/amp-upstream
 
 # Runtime
-# Same Alpine branch as the golang:1.27.3-alpine builder.
+# Same Alpine branch as the golang:1.27.4-alpine builder.
 FROM alpine:3.24
 
 RUN apk add --no-cache ca-certificates tzdata && \
