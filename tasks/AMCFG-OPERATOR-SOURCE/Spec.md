@@ -32,7 +32,7 @@ based_on:
 
 ## Current State
 
-- **Code:** `helm/amp/templates/{configmap,statefulset,_validate}.yaml|tpl`; Go не меняется: `POST /-/reload` уже есть (ADR-019).
+- **Code:** `helm/amp/templates/{configmap,statefulset,_validate}.yaml|tpl`; `go-app/cmd/amp-upstream`: флаг `--web.reload-listen-address` (только loopback, только `POST /-/reload`).
 - **Data:** не применимо.
 - **Tests:** `helm/amp/tests/render-*.sh`, запускаются гейтом `helm-tests`.
 - **Docs:** `helm/amp/README.md`, ADR-012, ADR-019.
@@ -44,7 +44,7 @@ based_on:
 | Оператор создаёт `-generated` при `replicas: 0` | спайк, k3s + v0.70 |
 | Базовый конфиг пилота переживает модель оператора | спайк, структурное сравнение |
 | AMP читает результат парсером upstream 0.34.1 | спайк, `config.LoadFile` |
-| Reloader перезагружает AMP через `/-/reload` | спайк, сквозной прогон |
+| Reloader перезагружает AMP через loopback-listener | сквозной прогон |
 
 ## Target Design
 
@@ -67,7 +67,7 @@ Values: `alertmanager.configSource` (`values` | `operator`), `alertmanager.opera
 
 ## Component Architecture
 
-`AMC → prometheus-operator → Secret -generated → reloader (gunzip, envsubst) → emptyDir → AMP, POST /-/reload`.
+`AMC → prometheus-operator → Secret -generated → reloader (gunzip, envsubst) → emptyDir → AMP, POST 127.0.0.1:9095/-/reload`.
 
 ## Security Design
 
@@ -75,7 +75,7 @@ Values: `alertmanager.configSource` (`values` | `operator`), `alertmanager.opera
 - `-generated` содержит токены AMC открытым текстом (принято владельцем). Поэтому рендер запрещает publishing discovery в этом режиме: `list secrets` прочитал бы Secret, а токен SA уровня пода попал бы и в reloader.
 - Распакованный файл — в `emptyDir` `medium: Memory`. `-generated` монтируется только в reloader-контейнеры.
 - По умолчанию AMC берутся только из ns релиза; все ns — явным `{}`.
-- Reloader не получает учётных данных: `$(VAR)` в AMC раскрывается из его окружения. При авторизации рендер требует явного `/-/reload` в `unauthenticated_paths`.
+- Reloader не получает учётных данных: `$(VAR)` в AMC раскрывается из его окружения. Он вызывает `--web.reload-listen-address=127.0.0.1:9095`: только loopback IP и только `POST /-/reload`, порт 9093 остаётся за авторизацией.
 - Образ reloader закреплён по digest.
 
 ## Invariants

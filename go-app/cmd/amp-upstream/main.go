@@ -50,6 +50,7 @@ func main() {
 	listenAddress := flag.String("web.listen-address", ":9093", "Address to listen on for the web interface and API.")
 	externalURL := flag.String("web.external-url", "", "The URL under which Alertmanager is externally reachable. Its path prefixes all HTTP endpoints.")
 	webConfigFile := flag.String("web.config.file", "", "Path to the web configuration file: basic_auth_users (bcrypt); else server.web_config_file in the AMP configuration, else SERVER_WEB_CONFIG_FILE. The probes /-/healthy and /-/ready (server.auth.unauthenticated_paths in the AMP configuration) are served without credentials. Empty: no authentication.")
+	reloadListenAddress := flag.String("web.reload-listen-address", "", "Loopback address of an additional listener that serves only POST /-/reload, without authentication, for a config reloader in the same pod. Empty: off.")
 	ampConfigFile := flag.String("amp.config.file", "", "AMP configuration file: alert history (database.*, profile standard), classification (llm.*) and investigation (investigation.*), read back under /api/amp/v1/. Empty: none.")
 	clusterOpts := clusterFlags(flag.CommandLine)
 	flag.Parse()
@@ -63,13 +64,13 @@ func main() {
 		logger.Error("amp_build_info registration failed", "err", err)
 		os.Exit(1)
 	}
-	if err := run(logger, *configFile, *dataDir, *retention, *listenAddress, *externalURL, *webConfigFile, *ampConfigFile, *clusterOpts); err != nil {
+	if err := run(logger, *configFile, *dataDir, *retention, *listenAddress, *reloadListenAddress, *externalURL, *webConfigFile, *ampConfigFile, *clusterOpts); err != nil {
 		logger.Error("amp-upstream exited with error", "err", err)
 		os.Exit(1)
 	}
 }
 
-func run(logger *slog.Logger, configFile, dataDir string, retention time.Duration, listenAddress, externalURL, webConfigFile, ampConfigFile string, clusterOpts upstreamcore.Options) error {
+func run(logger *slog.Logger, configFile, dataDir string, retention time.Duration, listenAddress, reloadListenAddress, externalURL, webConfigFile, ampConfigFile string, clusterOpts upstreamcore.Options) error {
 	// Matcher parsing is process-global upstream; without this call it stays
 	// in classic mode instead of upstream's default fallback mode.
 	compat.InitFromFlags(logger, featurecontrol.NoopFlags{})
@@ -151,6 +152,14 @@ func run(logger *slog.Logger, configFile, dataDir string, retention time.Duratio
 		return err
 	}
 
+	var reloadListener net.Listener
+	if reloadListenAddress != "" {
+		if reloadListener, err = listenLoopback(reloadListenAddress); err != nil {
+			_ = listener.Close()
+			return err
+		}
+	}
+
 	if targets != nil {
 		// Cancelled before core.Stop runs: a poll must not reload a stopped
 		// core (Reload would only return an error, but there is no reason to
@@ -167,8 +176,15 @@ func run(logger *slog.Logger, configFile, dataDir string, retention time.Duratio
 	defer signal.Stop(hup)
 
 	server := &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second}
-	serveErr := make(chan error, 1)
+	// One slot per server: neither goroutine blocks once run has returned.
+	serveErr := make(chan error, 2)
 	go func() { serveErr <- server.Serve(listener) }()
+	if reloadListener != nil {
+		reloadServer := &http.Server{Handler: reloadHandler(core.Reload, logger), ReadHeaderTimeout: 10 * time.Second}
+		defer func() { _ = reloadServer.Close() }()
+		go func() { serveErr <- reloadServer.Serve(reloadListener) }()
+		logger.Info("listening for reload requests", "address", reloadListener.Addr().String())
+	}
 	logger.Info("listening", "address", listener.Addr().String(), "external_url", amURL.String())
 
 	for {

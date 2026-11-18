@@ -29,7 +29,7 @@
 | Пути TLS | `/etc/alertmanager/certs/secret_<ns>_<secret>_<key>` | Содержимое — в Secret `alertmanager-<name>-tls-assets-0` |
 | Секреты AMC | **Открытым текстом в `-generated`** | `bot_token`, `routing_key`, `api_url`, `auth_password`, `credentials` |
 | Перезагрузка AMP | **Работает, без рестарта** | Новый AMC активен через 77–81 с (синхронизация Secret'а kubelet'ом); `restartCount` 0, тот же UID пода, `alertmanager_config_last_reload_successful 1` |
-| Авторизация и path prefix | **Работает при открытом `/-/reload`** | С `/-/reload` в `unauthenticated_paths`: reload без пароля — 200, `/api/v2/status` и `/metrics` — 401, новый AMC активен без рестарта |
+| Авторизация и path prefix | **Работает через loopback-listener** | `127.0.0.1:9095`: `GET /-/reload` — 405, другой путь — 404, по IP пода соединение отклонено. Порт 9093 без пароля: `/-/reload`, `/api/v2/status`, `/metrics` — 401, `/-/healthy` — 200. Новый AMC активен через 89 с, тот же под, 0 рестартов. Вариант с открытым `/-/reload` отклонён (ADR-020) |
 | Смена базового конфига через `helm upgrade` | **Без рестарта** | Активна через 77 с, тот же UID пода |
 | Откат и двухшаговое включение | **Работают** | `operator` → `values` + `prepare` → `operator`, под готов на каждом шаге |
 | Секреты в `/api/v2/status` | **Замаскированы** | Поддельного токена AMC в ответе нет, есть `<secret>` |

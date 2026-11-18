@@ -180,6 +180,10 @@ spec:
             {{- if .Values.webConfig.existingSecret }}
             - --web.config.file={{ printf "%s/%s" .Values.webConfig.mountPath .Values.webConfig.secretKey }}
             {{- end }}
+            {{- if $operatorSource }}
+            # Loopback only, without credentials: for the config-reloader sidecar.
+            - --web.reload-listen-address=127.0.0.1:9095
+            {{- end }}
             {{- if gt $replicas 1 }}
             - --cluster.listen-address=0.0.0.0:9094
             # Brackets keep an IPv6 pod address valid.
@@ -285,14 +289,14 @@ spec:
             {{- toYaml . | nindent 12 }}
             {{- end }}
         {{- if $operatorSource }}
-        # Unpacks the operator's Secret and calls /-/reload when it changes.
+        # Unpacks the operator's Secret and calls the loopback reload listener when it changes.
         # Never give this container a credential: $(VAR) in any
         # AlertmanagerConfig expands from its environment (ADR-020).
         - name: config-reloader
           image: "{{ $reloader.image.repository }}:{{ $reloader.image.tag }}"
           imagePullPolicy: {{ $reloader.image.pullPolicy | default "IfNotPresent" }}
           args:
-            - --reload-url=http://127.0.0.1:9093{{ $prefix }}/-/reload
+            - --reload-url=http://127.0.0.1:9095/-/reload
             {{- toYaml $reloaderArgs | nindent 12 }}
           env:
             - name: POD_NAME

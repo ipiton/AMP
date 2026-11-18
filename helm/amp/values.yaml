@@ -793,9 +793,9 @@ alertmanager:
   #   operator  prometheus-operator merges alertmanager.config with the selected
   #             AlertmanagerConfig resources. The chart creates an Alertmanager
   #             resource with replicas: 0 (no second Alertmanager runs) and
-  #             mounts its generated Secret; a sidecar calls /-/reload on
-  #             changes. Needs publishing.enabled=false, and with HTTP
-  #             authentication /-/reload in server.auth.unauthenticated_paths.
+  #             mounts its generated Secret; a sidecar triggers a reload on
+  #             changes through a loopback-only listener. Needs
+  #             publishing.enabled=false and an AMP image newer than 0.1.0.
   # Before enabling operator, read "AlertmanagerConfig via prometheus-operator"
   # in the chart README: the operator's model limits alertmanager.config, and
   # the generated Secret holds AlertmanagerConfig credentials in plain text.
