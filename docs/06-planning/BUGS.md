@@ -83,7 +83,7 @@
 - **Impact:** мониторинг встроенного PostgreSQL выглядит включённым, но не работает; находки `PG-ALERT-RULES-METRICS` на живом кластере даже не проявляются.
 - **Fix:** ServiceMonitor для exporter'а под `postgresql.exporter.enabled` + гейт `amp.monitoringCRDs`, `monitoring.serviceMonitor.labels`, порт `metrics`; NetworkPolicy PG пропускает `networkPolicy.metricsScrapers` на 9187; render-тест; проверка на k3s, что `pg_up` появился и правила вычисляются.
 - **Refs:** промежуточный срез пилота 2026-11-14 (`AMP-PILOT-WEEK-REVIEW`); связано с `PG-ALERT-RULES-METRICS`, BACKLOG `PG-MONITORING-CHECKS`.
-- **Status:** open
+- **Status:** исправлено в ветке `claude/amp-postgres-ops-6925b8`, проверено на k3s (`tasks/AMP-PG-OPS/evidence.md`); ждёт мержа и выкатки
 
 ### [medium][Helm][~0.5d] PG-ALERT-RULES-METRICS
 - **Title:** часть правил `postgresql.rules` ссылается на метрики, которых exporter не отдаёт, а `PostgreSQLVacuumOld` шумит
@@ -91,6 +91,22 @@
 - **Impact:** операторы считают, что насыщение соединений, wraparound и медленные запросы под алертами, а их нет; плюс постоянный шум VacuumOld на тихих таблицах.
 - **Fix:** сверить каждое правило с `/metrics` exporter'а (или включить нужные коллекторы), для VacuumOld учитывать `n_dead_tup`/`n_mod_since_analyze` или убрать; `promtool test rules` на каждое правило — вместе с BACKLOG `PG-MONITORING-CHECKS`.
 - **Refs:** `tasks/archive/PG-CONFIG-FIX/review-findings.md` R3, R13; `evidence/k3d-acceptance.md` K1.3.
+- **Status:** исправлено в ветке `claude/amp-postgres-ops-6925b8` (`tasks/AMP-PG-OPS/evidence.md`); ждёт мержа и выкатки
+
+### [high][Helm][~0.25d] AMP-START-BLOCKED-BY-PG
+- **Title:** AMP, перезапущенный при лежащем встроенном PostgreSQL, около трёх минут не принимает и не доставляет алерты
+- **Problem:** init-контейнер `wait-for-postgres` (`templates/statefulset.yaml`) ждёт БД до 120 с, и всё это время контейнер `amp` не запущен. На k3s 2026-11-18 от `rollout restart` до Ready прошло 178 с, `POST /api/v2/alerts` не проходил. Работающий AMP при той же недоступности БД продолжает доставку.
+- **Impact:** блокер замены основного Alertmanager: падение узла или одновременный рестарт PG и AMP превращают потерю истории в окно без уведомлений. В режиме «только история» не влияет на доставку.
+- **Fix:** не держать старт доставки за БД: убрать ожидание из init и подключаться в фоне (вместе с `UPSTREAM-HISTORY-PG-RECONNECT`, `AMP-NO-DB-WAIT`); минимум — сократить ожидание до секунд.
+- **Refs:** `tasks/AMP-PG-OPS/evidence.md` § 3.
+- **Status:** open
+
+### [low][Helm][~0.25d] PG-EXEC-PROBES-CPU-THROTTLING
+- **Title:** exec-пробы встроенного PostgreSQL дают основную часть его CPU и CFS-throttling
+- **Problem:** readiness (раз в 5 с) и liveness (раз в 10 с) запускают процессы внутри контейнера, и их короткие всплески упираются в квоту. На k3s при лимите 500m: 42–44m CPU и 29–33% throttled-периодов; без этих проб 8m и 5%; с `tcpSocket`-пробами 8m и 0%; с exec-пробами при 1000m 6%, при 2000m 0%. Пилот (500m, 37,7m, 37%) выглядит так же. Счётчик периодов учитывает только активные периоды, поэтому 37% не равны 3,7 периода в секунду.
+- **Impact:** алерт `CPUThrottlingHigh` и лишний CPU; на запросах пока не сказывается. Проверено на k3s, не на `sema-prod`.
+- **Fix:** на пилоте поднять `postgresql.resources.limits.cpu` до дефолтных 1000m; в чарте решить, заменять ли liveness на `tcpSocket` (readiness должна по-прежнему отличать БД, которая ещё стартует).
+- **Refs:** `tasks/AMP-PG-OPS/evidence.md` § 4.
 - **Status:** open
 
 ### [medium][App][~0.25d] AMP-NO-DB-WAIT

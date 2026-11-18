@@ -61,6 +61,7 @@
 
 - [ ] **PG-MONITORING-CHECKS** — мониторинг встроенного PostgreSQL проверяется только рендером: `render-postgresql.sh` ловит `now()` и столбцы `tablename`/`indexname`, но не выполняет ни PromQL, ни SQL. Сделать: в `helm/amp/tests/` — `promtool check rules` + `promtool test rules` по отрендеренному `PrometheusRule` (skip без `promtool`), запросы `postgresql-exporter-configmap.yaml` против `postgres:16.15` в docker (или exporter v0.15.0 + `/metrics` без ошибок); решить, входит ли в `release-gate.sh`. Оценка ~0.5d.
   - _Источник: PG-CONFIG-FIX deep-review R7(2) (2026-10-17). Парный баг — `PG-ALERT-RULES-METRICS`._
+  - _2026-11-18, ветка `claude/amp-postgres-ops-6925b8`: часть с `promtool` сделана (`helm/amp/tests/render-postgresql-rules.sh`, входит в гейт). Остаётся прогон SQL exporter'а против `postgres:16.15` в тестах._
 
 ### Закрыто
 
