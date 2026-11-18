@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- **AMCFG-OPERATOR-SOURCE** (2026-11-18): `alertmanager.configSource: operator` takes `alertmanager.yml` from prometheus-operator, so `AlertmanagerConfig` resources reach AMP. The chart creates an `Alertmanager` resource with `replicas: 0` and a base-config Secret, mounts `alertmanager-<fullname>-generated`, and runs `prometheus-config-reloader` as an init container and a sidecar. The default, `values`, is unchanged. `alertmanager.operator.prepare` creates the resource first, so the switch can be checked before pods change. The generated Secret holds `AlertmanagerConfig` credentials in plain text, so the render refuses publishing target discovery in this mode. The reloader carries no credentials and calls `--web.reload-listen-address`, a new loopback-only listener that serves just `POST /-/reload` and reloads only when the config file changed, so this mode needs an image newer than `0.1.0`; `/-/reload` on the main port stays behind authentication (ADR-020).
 - **HELM-PROMRULE-LABELS** (2026-11-09): `monitoring.prometheusRule.labels` adds labels to the chart's `PrometheusRule`s (PostgreSQL, Valkey), and `monitoring.serviceMonitor.labels` now also lands on the Valkey ServiceMonitor. kube-prometheus-stack loads rules only with `release: <its release name>`, so the chart's alerts were silently ignored there.
 
 ## [0.1.0] - 2026-11-09

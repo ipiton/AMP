@@ -780,12 +780,56 @@ alertmanager:
   # before notifying (upstream default).
   peerTimeout: 15s
   # alertmanager.yml, as upstream Alertmanager reads it. A change rolls the
-  # pods (checksum/config).
+  # pods (checksum/config). With configSource: operator it is the base config
+  # the operator merges AlertmanagerConfig resources into, and a change is
+  # applied by reload, without a restart.
   config:
     route:
       receiver: default
     receivers:
       - name: default
+  # Where alertmanager.yml comes from (ADR-020):
+  #   values    alertmanager.config, as is.
+  #   operator  prometheus-operator merges alertmanager.config with the selected
+  #             AlertmanagerConfig resources. The chart creates an Alertmanager
+  #             resource with replicas: 0 (no second Alertmanager runs) and
+  #             mounts its generated Secret; a sidecar triggers a reload on
+  #             changes through a loopback-only listener. Needs
+  #             publishing.enabled=false and an AMP image newer than 0.1.0.
+  # Before enabling operator, read "AlertmanagerConfig via prometheus-operator"
+  # in the chart README: the operator's model limits alertmanager.config, and
+  # the generated Secret holds AlertmanagerConfig credentials in plain text.
+  configSource: values
+  # Used with configSource: operator, or with prepare.
+  operator:
+    # Create the Alertmanager resource while configSource is still values, to
+    # check its status and generated Secret before switching: the switch drops
+    # the ConfigMap, and pods wait for the Secret.
+    prepare: false
+    # spec.version of the Alertmanager resource: the Alertmanager version the
+    # operator generates config for. AMP embeds upstream v0.34.1.
+    version: v0.34.1
+    # Which AlertmanagerConfig resources to merge. {} selects all; null none.
+    alertmanagerConfigSelector: {}
+    # Namespaces to look in. null: the release namespace only. {}: every
+    # namespace, and their referenced credentials land in the generated Secret.
+    alertmanagerConfigNamespaceSelector: null
+    # e.g. {type: None}. Empty: the operator's default, OnNamespace, which
+    # restricts each resource to alerts of its own namespace.
+    alertmanagerConfigMatcherStrategy: {}
+    reloader:
+      image:
+        repository: quay.io/prometheus-operator/prometheus-config-reloader
+        # By digest: this container can read every AlertmanagerConfig credential.
+        tag: v0.70.0@sha256:e20576b76ffd85d2a28d62809092f47b339737320e80646ec6d0e7ac0f4c8e43
+        pullPolicy: IfNotPresent
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          cpu: 100m
+          memory: 64Mi
   # Merged over the AMP configuration the chart generates from profile,
   # environment, database, llm, investigation and publishing
   # (<fullname>-amp-config, --amp.config.file), e.g.

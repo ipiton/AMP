@@ -26,7 +26,7 @@ Queue и WIP — источник правды для выбора задачи.
 
 ### AlertmanagerConfig — блокер замены основного AM
 
-- [ ] **AMCFG-SPIKE** — go/no-go для «теневого» CR `Alertmanager` на k3d, ~0.5d, Lightweight. Детали и следующие срезы — `BACKLOG.md` § AlertmanagerConfig, research — `AMCFG-RESEARCH-2026-11-14.md`.
+- [ ] **AMCFG-PILOT-CUTOVER** — спайк дал GO, режим чарта готов (ADR-020). Переход на пилоте — решение владельца. Условия — `BACKLOG.md` § AlertmanagerConfig.
 
 ### ADR-019 — AMP на пакетах upstream Alertmanager
 
