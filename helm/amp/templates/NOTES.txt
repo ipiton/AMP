@@ -35,6 +35,13 @@ External URL: {{ include "amp.externalURL" . }}
 {{- else }}
 ℹ️  No HTTP authentication (webConfig.existingSecret)
 {{- end }}
+{{- if include "amp.operatorConfigSource" . }}
+ℹ️  alertmanager.yml comes from prometheus-operator: Alertmanager {{ $fullname }} (replicas: 0),
+   Secret alertmanager-{{ $fullname }}-generated. Pods wait for that Secret. If it does not appear:
+   kubectl get alertmanager {{ $fullname }} -n {{ $ns }} -o jsonpath='{.status.conditions}'
+⚠️  That Secret holds AlertmanagerConfig credentials in plain text: restrict who can read
+   Secrets in namespace {{ $ns }}.
+{{- end }}
 {{- if and (dig "prometheusEnabled" false (.Values.monitoring | default dict)) (not (include "amp.monitoringCRDs" .)) }}
 ℹ️  ServiceMonitor/PrometheusRules skipped: the cluster does not serve monitoring.coreos.com/v1
    (prometheus-operator CRDs). Install the CRDs and upgrade, or set monitoring.assumeCRDs=true.

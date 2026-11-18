@@ -59,4 +59,30 @@ they configured (routes in configFile.content, upstreamCore.config).
 {{- end }}
 {{- end }}
 {{- end }}
+{{- $source := $am.configSource | default "values" }}
+{{- if not (has $source (list "values" "operator")) }}
+{{- fail (printf "alertmanager.configSource must be values or operator, got %q." $source) }}
+{{- end }}
+{{- if eq $source "operator" }}
+{{- $op := $am.operator | default dict }}
+{{- if not (kindIs "map" (dig "reloader" "image" nil $op)) }}
+{{- fail "alertmanager.configSource=operator needs alertmanager.operator.reloader.image: with helm upgrade use --reset-then-reuse-values (Helm >= 3.14) or a values file for this chart, not --reuse-values." }}
+{{- end }}
+{{- if not (include "amp.monitoringCRDs" .) }}
+{{- fail "alertmanager.configSource=operator needs prometheus-operator: the cluster does not serve monitoring.coreos.com/v1. Install it, or for a render without a cluster pass --api-versions monitoring.coreos.com/v1 or set monitoring.assumeCRDs=true." }}
+{{- end }}
+{{- /* RBAC cannot filter `list` by label: the discovery Role would read the generated Secret with the tokens of every selected AlertmanagerConfig (ADR-012, ADR-020). */}}
+{{- $releaseNamespace := include "amp.namespace" . }}
+{{- if and (include "amp.discoveryEnabled" .) (eq (.Values.publishing.discovery.namespace | default $releaseNamespace) $releaseNamespace) }}
+{{- fail (printf "alertmanager.configSource=operator puts AlertmanagerConfig credentials into a Secret of namespace %s, and publishing target discovery lists every Secret there. Set publishing.discovery.namespace to another namespace, or publishing.enabled=false." $releaseNamespace) }}
+{{- end }}
+{{- $reloadURL := dig "reloader" "reloadURLSecret" dict $op }}
+{{- if and $reloadURL.name (not $reloadURL.key) }}
+{{- fail "alertmanager.operator.reloader.reloadURLSecret.key is required with reloadURLSecret.name." }}
+{{- end }}
+{{- $webConfigFile := or .Values.webConfig.existingSecret (dig "server" "web_config_file" "" ($am.ampConfig | default dict)) }}
+{{- if and $webConfigFile (not $reloadURL.name) }}
+{{- fail "HTTP authentication is on, so the config reloader cannot call /-/reload: set alertmanager.operator.reloader.reloadURLSecret to a Secret key holding http://<user>:<url-encoded password>@127.0.0.1:9093<path prefix>/-/reload." }}
+{{- end }}
+{{- end }}
 {{- end }}

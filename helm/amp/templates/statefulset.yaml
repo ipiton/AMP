@@ -11,6 +11,13 @@
 {{- $prefix := include "amp.pathPrefix" . }}
 {{- $ext := .Values.externalDatabase | default dict }}
 {{- $configDir := "/etc/amp/config" }}
+{{- $operatorSource := include "amp.operatorConfigSource" . }}
+{{- /* The paths prometheus-operator itself uses: the generated config points TLS files at /etc/alertmanager/certs. */}}
+{{- $operatorDir := "/etc/alertmanager/config" }}
+{{- $operatorOutDir := "/etc/alertmanager/config_out" }}
+{{- $operatorCertsDir := "/etc/alertmanager/certs" }}
+{{- $operatorConfigFile := printf "%s/alertmanager.env.yaml" $operatorOutDir }}
+{{- $waitForPostgres := and (eq .Values.profile "standard") .Values.postgresql.enabled (not $ext.host) }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -65,6 +72,14 @@ spec:
       {{- end }}
       {{- end }}
       {{- end }}
+      {{- if $operatorSource }}
+      {{- range $name := list "operator-config" "operator-config-out" "operator-tls-assets" }}
+      {{- $_ := set $chartVolumes $name "alertmanager.configSource=operator" }}
+      {{- end }}
+      {{- range $path := list $operatorDir $operatorOutDir $operatorCertsDir }}
+      {{- $_ := set $chartPaths $path "alertmanager.configSource=operator" }}
+      {{- end }}
+      {{- end }}
       {{- range $extraVolumes }}
       {{- if hasKey $chartVolumes (toString .name) }}
       {{- fail (printf "extraVolumes: volume name %q is already used by the chart (%s). Pick another name." (toString .name) (get $chartVolumes (toString .name))) }}
@@ -89,12 +104,46 @@ spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       terminationGracePeriodSeconds: {{ .Values.gracefulShutdown.terminationGracePeriodSeconds | default 40 }}
-      {{- if and (eq .Values.profile "standard") .Values.postgresql.enabled (not $ext.host) }}
+      {{- $reloader := dict }}
+      {{- $reloaderArgs := list }}
+      {{- if $operatorSource }}
+      {{- $reloader = .Values.alertmanager.operator.reloader }}
+      {{- $reloaderArgs = list (printf "--config-file=%s/alertmanager.yaml.gz" $operatorDir) (printf "--config-envsubst-file=%s" $operatorConfigFile) (printf "--watched-dir=%s" $operatorDir) "--listen-address=" }}
+      {{- end }}
+      {{- if or $operatorSource $waitForPostgres }}
+      initContainers:
+      {{- end }}
+      {{- if $operatorSource }}
+        # Renders the config before AMP starts, as the operator's own init-config-reloader.
+        - name: init-config-reloader
+          image: "{{ $reloader.image.repository }}:{{ $reloader.image.tag }}"
+          imagePullPolicy: {{ $reloader.image.pullPolicy }}
+          args:
+            - --watch-interval=0
+            {{- toYaml $reloaderArgs | nindent 12 }}
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: SHARD
+              value: "-1"
+          resources:
+            {{- toYaml $reloader.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: operator-config
+              mountPath: {{ $operatorDir }}
+              readOnly: true
+            - name: operator-config-out
+              mountPath: {{ $operatorOutDir }}
+      {{- end }}
+      {{- if $waitForPostgres }}
       # AMP connects to PostgreSQL once at start (UPSTREAM-HISTORY-PG-RECONNECT):
       # on a fresh install the bundled one is still pulling its image or running
       # initdb, and AMP would run without history until restarted. Wait for it,
       # but at most 120s: alert delivery must not depend on the database.
-      initContainers:
         - name: wait-for-postgres
           image: postgres:16.15
           imagePullPolicy: IfNotPresent
@@ -122,7 +171,7 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
-            - --config.file={{ $configDir }}/alertmanager.yml
+            - --config.file={{ if $operatorSource }}{{ $operatorConfigFile }}{{ else }}{{ $configDir }}/alertmanager.yml{{ end }}
             - --amp.config.file={{ $configDir }}/amp.yaml
             - --storage.path=/data
             - --web.listen-address=:9093
@@ -218,6 +267,14 @@ spec:
               readOnly: true
             - name: data
               mountPath: /data
+            {{- if $operatorSource }}
+            - name: operator-config-out
+              mountPath: {{ $operatorOutDir }}
+              readOnly: true
+            - name: operator-tls-assets
+              mountPath: {{ $operatorCertsDir }}
+              readOnly: true
+            {{- end }}
             {{- if .Values.webConfig.existingSecret }}
             - name: web-config
               mountPath: {{ .Values.webConfig.mountPath }}
@@ -226,12 +283,65 @@ spec:
             {{- with $extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+        {{- if $operatorSource }}
+        # Unpacks the operator's Secret and calls /-/reload when it changes.
+        - name: config-reloader
+          image: "{{ $reloader.image.repository }}:{{ $reloader.image.tag }}"
+          imagePullPolicy: {{ $reloader.image.pullPolicy }}
+          args:
+            {{- if $reloader.reloadURLSecret.name }}
+            - --reload-url=$(RELOAD_URL)
+            {{- else }}
+            - --reload-url=http://127.0.0.1:9093{{ $prefix }}/-/reload
+            {{- end }}
+            {{- toYaml $reloaderArgs | nindent 12 }}
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: SHARD
+              value: "-1"
+            {{- if $reloader.reloadURLSecret.name }}
+            - name: RELOAD_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $reloader.reloadURLSecret.name | quote }}
+                  key: {{ $reloader.reloadURLSecret.key | quote }}
+            {{- end }}
+          resources:
+            {{- toYaml $reloader.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: operator-config
+              mountPath: {{ $operatorDir }}
+              readOnly: true
+            - name: operator-config-out
+              mountPath: {{ $operatorOutDir }}
+        {{- end }}
       volumes:
+        {{- if $operatorSource }}
+        - name: operator-config
+          secret:
+            secretName: alertmanager-{{ $fullname }}-generated
+        # Memory: the rendered file holds AlertmanagerConfig credentials in plain text.
+        - name: operator-config-out
+          emptyDir:
+            medium: Memory
+        - name: operator-tls-assets
+          projected:
+            sources:
+              - secret:
+                  name: alertmanager-{{ $fullname }}-tls-assets-0
+        {{- end }}
         - name: config
           projected:
             sources:
+              {{- if not $operatorSource }}
               - configMap:
                   name: {{ $fullname }}
+              {{- end }}
               - configMap:
                   name: {{ $fullname }}-amp-config
         {{- if .Values.webConfig.existingSecret }}

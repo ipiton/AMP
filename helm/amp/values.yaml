@@ -780,12 +780,54 @@ alertmanager:
   # before notifying (upstream default).
   peerTimeout: 15s
   # alertmanager.yml, as upstream Alertmanager reads it. A change rolls the
-  # pods (checksum/config).
+  # pods (checksum/config). With configSource: operator it is the base config
+  # the operator merges AlertmanagerConfig resources into, and a change is
+  # applied by reload, without a restart.
   config:
     route:
       receiver: default
     receivers:
       - name: default
+  # Where alertmanager.yml comes from (ADR-020):
+  #   values    alertmanager.config, as is.
+  #   operator  prometheus-operator merges alertmanager.config with the selected
+  #             AlertmanagerConfig resources. The chart creates an Alertmanager
+  #             resource with replicas: 0 (no second Alertmanager runs) and
+  #             mounts its generated Secret; a sidecar reloads AMP on changes.
+  # Before enabling operator, read "AlertmanagerConfig via prometheus-operator"
+  # in the chart README: the operator's model limits alertmanager.config, and
+  # the generated Secret holds AlertmanagerConfig credentials in plain text.
+  configSource: values
+  # Used with configSource: operator only.
+  operator:
+    # spec.version of the Alertmanager resource: the Alertmanager version the
+    # operator generates config for. AMP embeds upstream v0.34.1.
+    version: v0.34.1
+    # Which AlertmanagerConfig resources to merge. {} selects all; null none.
+    alertmanagerConfigSelector: {}
+    # Namespaces to look in. null: the release namespace only. {}: every
+    # namespace, and their referenced credentials land in the generated Secret.
+    alertmanagerConfigNamespaceSelector: null
+    # e.g. {type: None}. Empty: the operator's default, OnNamespace, which
+    # restricts each resource to alerts of its own namespace.
+    alertmanagerConfigMatcherStrategy: {}
+    reloader:
+      image:
+        repository: quay.io/prometheus-operator/prometheus-config-reloader
+        tag: v0.70.0
+        pullPolicy: IfNotPresent
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          cpu: 100m
+          memory: 64Mi
+      # Required with HTTP authentication (webConfig): a Secret key holding
+      # http://<user>:<url-encoded password>@127.0.0.1:9093<path prefix>/-/reload
+      reloadURLSecret:
+        name: ""
+        key: ""
   # Merged over the AMP configuration the chart generates from profile,
   # environment, database, llm, investigation and publishing
   # (<fullname>-amp-config, --amp.config.file), e.g.

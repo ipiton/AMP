@@ -1,5 +1,6 @@
 {{- include "amp.validate" . }}
-{{- /* alertmanager.yml, as upstream Alertmanager reads it (--config.file). */}}
+{{- /* alertmanager.yml, as upstream Alertmanager reads it (--config.file). With configSource=operator it comes from templates/operator-alertmanager.yaml. */}}
+{{- if not (include "amp.operatorConfigSource" .) }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -11,3 +12,4 @@ metadata:
 data:
   alertmanager.yml: |
     {{- toYaml .Values.alertmanager.config | nindent 4 }}
+{{- end }}

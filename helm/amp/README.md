@@ -280,6 +280,46 @@ alertmanager:
 - After changing the Secret, wait for kubelet to sync the volume (about a minute), then `POST /-/reload` to every pod (authenticated when `webConfig` is enabled) or `kubectl rollout restart statefulset/<fullname>`. Mounts with `subPath` are never updated.
 - The same keys mount a ConfigMap with runbooks or any other file AMP should read.
 
+### AlertmanagerConfig via prometheus-operator
+
+AMP reads one `alertmanager.yml`. To use `AlertmanagerConfig` resources (`monitoring.coreos.com/v1alpha1`), let prometheus-operator render that file:
+
+```yaml
+alertmanager:
+  configSource: operator
+  operator:
+    alertmanagerConfigSelector: {}             # which resources; {} = all
+    alertmanagerConfigNamespaceSelector: {}    # which namespaces; omit = the release namespace only
+publishing:
+  enabled: false                               # or discovery.namespace: <another namespace>
+```
+
+The chart creates an `Alertmanager` resource with `replicas: 0`, so no second Alertmanager runs, and a Secret with `alertmanager.config` as its base config. The operator merges the selected resources into Secret `alertmanager-<fullname>-generated`. AMP pods mount it through the `prometheus-config-reloader` image, and a sidecar calls `/-/reload` when it changes, without a restart.
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `alertmanager.configSource` | `values` or `operator` | `values` |
+| `alertmanager.operator.version` | `spec.version`: the Alertmanager version to generate config for | `v0.34.1` |
+| `alertmanager.operator.alertmanagerConfigSelector` | Label selector; `{}` all, `null` none | `{}` |
+| `alertmanager.operator.alertmanagerConfigNamespaceSelector` | Namespace selector; `null` the release namespace, `{}` all | `null` |
+| `alertmanager.operator.alertmanagerConfigMatcherStrategy` | For example `{type: None}`; empty is the operator's `OnNamespace` | `{}` |
+| `alertmanager.operator.reloader.image` | Config reloader image | `quay.io/prometheus-operator/prometheus-config-reloader:v0.70.0` |
+| `alertmanager.operator.reloader.reloadURLSecret` | `name` and `key` of the reload URL, required with HTTP authentication | empty |
+
+- **Credentials.** The operator writes credentials referenced by `AlertmanagerConfig` resources into the generated Secret in plain text, as it does for its own Alertmanager. Anyone who can read Secrets in the release namespace can read them. The render fails if publishing target discovery would list that namespace: set `publishing.discovery.namespace` to another one or `publishing.enabled: false`. The AMP service account gets no new permissions.
+- **HTTP authentication.** With `webConfig` enabled, create a Secret key holding `http://<user>:<url-encoded password>@127.0.0.1:9093<path prefix>/-/reload` and point `reloadURLSecret` at it. The render fails without it.
+- **The operator limits `alertmanager.config`.** It parses the base config with its own strict model, so a field that model lacks rejects the whole config. With operator v0.70 that includes `msteamsv2_configs`, `jira_configs`, `rocketchat_configs`, `mattermost_configs`, `incidentio_configs`, Telegram `message_thread_id`, `webhook_url_file` in Discord and MS Teams, Slack `app_token`/`app_token_file`/`timeout`, `global.telegram_bot_token_file`, and `tracing`. `bot_token_file`, `slack_api_url_file`, `api_url_file`, `matchers`, `inhibit_rules` with `equal`, and `time_intervals` pass unchanged.
+- **When the operator rejects a config**, `status.conditions` of the `Alertmanager` shows `Reconciled=False` and AMP keeps the last generated config. On a first install there is none yet, and the pods wait in `ContainerCreating`:
+
+  ```bash
+  kubectl get alertmanager <fullname> -n <namespace> -o jsonpath='{.status.conditions}'
+  ```
+
+- An invalid `AlertmanagerConfig` is skipped by the operator with a warning in its log; the others still apply.
+- TLS files from `AlertmanagerConfig` resources are mounted from `alertmanager-<fullname>-tls-assets-0` at the operator's path, `/etc/alertmanager/certs`. If the operator splits them over several Secrets, the rest are not mounted.
+- `$(VAR)` in the config is expanded by the reloader, as for the operator's own Alertmanager. An unset variable fails the reload.
+- Changing `configSource` restarts the pods. Check the result with `alertmanager_config_last_reload_successful`.
+
 ### Graceful Shutdown
 
 On termination the pod first runs a preStop `sleep` while Kubernetes removes it from Service endpoints, then `amp-upstream` gets `SIGTERM`: in-flight HTTP requests drain (up to 5s), the core stops and writes its final silence and notification-log snapshots, then AMP's workers stop. Details: `docs/CONFIGURATION_GUIDE.md` → "Graceful Shutdown".
