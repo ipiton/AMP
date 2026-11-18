@@ -71,6 +71,10 @@ they configured (routes in configFile.content, upstreamCore.config).
 {{- if not (or (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/Alertmanager") (dig "assumeCRDs" false (.Values.monitoring | default dict))) }}
 {{- fail "alertmanager.configSource=operator needs prometheus-operator: the cluster does not serve monitoring.coreos.com/v1 Alertmanager. Install it, or for a render without a cluster pass --api-versions monitoring.coreos.com/v1/Alertmanager or set monitoring.assumeCRDs=true." }}
 {{- end }}
+{{- /* Image 0.1.0 has no --web.reload-listen-address and would exit at start. */}}
+{{- if and (include "amp.operatorConfigSource" .) (regexMatch "^v?0\\.1\\.0(@.*)?$" (toString (.Values.image.tag | default .Chart.AppVersion))) }}
+{{- fail "alertmanager.configSource=operator needs an AMP image newer than 0.1.0 (--web.reload-listen-address): set image.tag." }}
+{{- end }}
 {{- /* The generated Secret holds AlertmanagerConfig credentials. RBAC cannot filter `list` by label, and a token mounted at pod level would also reach the reloader container (ADR-012, ADR-020). */}}
 {{- if include "amp.discoveryEnabled" . }}
 {{- fail "alertmanager.configSource=operator (or alertmanager.operator.prepare) cannot be combined with publishing target discovery: the generated Secret holds AlertmanagerConfig credentials, and the pod must not carry a Kubernetes API token. Set publishing.enabled=false." }}

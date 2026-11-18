@@ -75,7 +75,7 @@ Values: `alertmanager.configSource` (`values` | `operator`), `alertmanager.opera
 - `-generated` содержит токены AMC открытым текстом (принято владельцем). Поэтому рендер запрещает publishing discovery в этом режиме: `list secrets` прочитал бы Secret, а токен SA уровня пода попал бы и в reloader.
 - Распакованный файл — в `emptyDir` `medium: Memory`. `-generated` монтируется только в reloader-контейнеры.
 - По умолчанию AMC берутся только из ns релиза; все ns — явным `{}`.
-- Reloader не получает учётных данных: `$(VAR)` в AMC раскрывается из его окружения. Он вызывает `--web.reload-listen-address=127.0.0.1:9095`: только loopback IP и только `POST /-/reload`, порт 9093 остаётся за авторизацией.
+- Reloader не получает учётных данных: `$(VAR)` в AMC раскрывается из его окружения. Он вызывает `--web.reload-listen-address=127.0.0.1:9095`: только loopback IP, только `POST /-/reload`, перезагрузка лишь при изменении файла; порт 9093 остаётся за авторизацией.
 - Образ reloader закреплён по digest.
 
 ## Invariants

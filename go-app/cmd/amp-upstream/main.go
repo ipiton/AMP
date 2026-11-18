@@ -50,7 +50,7 @@ func main() {
 	listenAddress := flag.String("web.listen-address", ":9093", "Address to listen on for the web interface and API.")
 	externalURL := flag.String("web.external-url", "", "The URL under which Alertmanager is externally reachable. Its path prefixes all HTTP endpoints.")
 	webConfigFile := flag.String("web.config.file", "", "Path to the web configuration file: basic_auth_users (bcrypt); else server.web_config_file in the AMP configuration, else SERVER_WEB_CONFIG_FILE. The probes /-/healthy and /-/ready (server.auth.unauthenticated_paths in the AMP configuration) are served without credentials. Empty: no authentication.")
-	reloadListenAddress := flag.String("web.reload-listen-address", "", "Loopback address of an additional listener that serves only POST /-/reload, without authentication, for a config reloader in the same pod. Empty: off.")
+	reloadListenAddress := flag.String("web.reload-listen-address", "", "Loopback address of an additional listener that serves only POST /-/reload, without authentication, for a config reloader in the same pod; a request reloads only when --config.file changed. Empty: off.")
 	ampConfigFile := flag.String("amp.config.file", "", "AMP configuration file: alert history (database.*, profile standard), classification (llm.*) and investigation (investigation.*), read back under /api/amp/v1/. Empty: none.")
 	clusterOpts := clusterFlags(flag.CommandLine)
 	flag.Parse()
@@ -180,7 +180,7 @@ func run(logger *slog.Logger, configFile, dataDir string, retention time.Duratio
 	serveErr := make(chan error, 2)
 	go func() { serveErr <- server.Serve(listener) }()
 	if reloadListener != nil {
-		reloadServer := &http.Server{Handler: reloadHandler(core.Reload, logger), ReadHeaderTimeout: 10 * time.Second}
+		reloadServer := &http.Server{Handler: reloadHandler(configFile, core.Reload, logger), ReadHeaderTimeout: 10 * time.Second}
 		defer func() { _ = reloadServer.Close() }()
 		go func() { serveErr <- reloadServer.Serve(reloadListener) }()
 		logger.Info("listening for reload requests", "address", reloadListener.Addr().String())
