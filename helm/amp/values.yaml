@@ -161,6 +161,8 @@ networkPolicy:
   # Prometheus, vmalert, ... posting alerts to the Service directly.
   alertSenders: []
   # Whoever scrapes /metrics (the Prometheus behind the ServiceMonitor below).
+  # Also the sources postgresql.networkPolicy lets in on the exporter port 9187,
+  # whether or not networkPolicy.enabled is set.
   metricsScrapers: []
   # Raw NetworkPolicyIngressRule entries, rendered as-is.
   extraIngress: []
@@ -298,6 +300,13 @@ postgresql:
 
   # PostgreSQL Monitoring (TN-98: observability)
   monitoring:
+    # ServiceMonitor for the exporter sidecar. Needs monitoring.prometheusEnabled
+    # and the prometheus-operator CRDs; takes interval, scrapeTimeout and labels
+    # from monitoring.serviceMonitor.
+    serviceMonitor:
+      enabled: true
+    # Alert rules on that scrape job: they render only together with the
+    # ServiceMonitor, since PostgreSQLDown fires when its metrics are absent.
     prometheusRules:
       enabled: true  # Enable Prometheus alerting rules
     # Grafana dashboard: Import from https://grafana.com/grafana/dashboards/9628 (PostgreSQL Database)

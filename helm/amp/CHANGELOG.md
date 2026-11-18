@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Breaking changes / migration notes
+- **PG-EXPORTER-NO-SERVICEMONITOR**: `postgresql.networkPolicy.enabled=true` now needs `networkPolicy.metricsScrapers` while the exporter ServiceMonitor is on; the render fails otherwise. The old hardcoded rule (namespace label `name: monitoring`, pod label `app: prometheus`) is gone. Set the scrapers, or `postgresql.monitoring.serviceMonitor.enabled=false`.
+- **PG-ALERT-RULES-METRICS**: the `amp-postgres` rules render only together with the ServiceMonitor. `PostgreSQLReplicationLag` is removed: the bundled PostgreSQL has no replication (ADR-016).
+- The first upgrade restarts the bundled PostgreSQL once: the StatefulSet gains a checksum of the exporter queries.
+
+### Fixed
+- **PG-EXPORTER-NO-SERVICEMONITOR**: the chart renders a ServiceMonitor for the PostgreSQL exporter; before, no `pg_*` metric reached Prometheus and every `amp-postgres` rule was blind.
+- **PG-ALERT-RULES-METRICS**: all rules use metrics the exporter serves and are scoped to the release's scrape job. `PostgreSQLDown` fires when the exporter's series are absent. `PostgreSQLSlowQueries` watches long-running queries. `PostgreSQLVacuumOld` fires only for a table past the autovacuum trigger. The `pg_long_running_queries` query returns one row per user, database and state, so two long queries no longer produce duplicate series.
+
 ### Added
 - **HELM-PROMRULE-LABELS** (2026-11-09): `monitoring.prometheusRule.labels` adds labels to the chart's `PrometheusRule`s (PostgreSQL, Valkey), and `monitoring.serviceMonitor.labels` now also lands on the Valkey ServiceMonitor. kube-prometheus-stack loads rules only with `release: <its release name>`, so the chart's alerts were silently ignored there.
 

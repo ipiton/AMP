@@ -202,13 +202,13 @@ data:
           usename as user,
           datname as database,
           state,
-          EXTRACT(EPOCH FROM (NOW() - query_start)) as duration_seconds,
+          MAX(EXTRACT(EPOCH FROM (NOW() - query_start))) as duration_seconds,
           COUNT(*) as count
         FROM pg_stat_activity
         WHERE state != 'idle'
           AND pid <> pg_backend_pid()
           AND query_start < NOW() - INTERVAL '5 seconds'
-        GROUP BY usename, datname, state, query_start
+        GROUP BY usename, datname, state
       metrics:
         - user:
             usage: "LABEL"
@@ -221,10 +221,10 @@ data:
             description: "Query state"
         - duration_seconds:
             usage: "GAUGE"
-            description: "Query duration in seconds"
+            description: "Duration of the longest such query in seconds"
         - count:
             usage: "GAUGE"
-            description: "Number of queries with this duration"
+            description: "Number of such queries"
 
     # =====================================
     # 8. TRANSACTION ID WRAPAROUND RISK

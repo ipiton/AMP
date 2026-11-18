@@ -1,0 +1,108 @@
+# promtool unit test of the rendered postgresql.rules group, driven by
+# render-postgresql-rules.sh (which writes rules.yaml next to a copy of this
+# file). Series carry the labels of the chart's exporter scrape job.
+rule_files:
+  - rules.yaml
+evaluation_interval: 1m
+
+tests:
+  # Every rule fires on its bad state.
+  - interval: 1m
+    input_series:
+      - series: 'pg_up{namespace="amp",job="amp-postgres-exporter",instance="i"}'
+        values: '0x1600'
+      - series: 'pg_stat_activity_count{namespace="amp",job="amp-postgres-exporter",instance="i",datname="alert_history",state="active"}'
+        values: '95x1600'
+      - series: 'pg_settings_max_connections{namespace="amp",job="amp-postgres-exporter",instance="i",server="localhost:5432"}'
+        values: '100x1600'
+      - series: 'pg_txid_wraparound_remaining_xids{namespace="amp",job="amp-postgres-exporter",instance="i",database="alert_history"}'
+        values: '100000000x1600'
+      - series: 'pg_long_running_queries_duration_seconds{namespace="amp",job="amp-postgres-exporter",instance="i",user="u",database="alert_history",state="active"}'
+        values: '120x1600'
+      - series: 'pg_stat_database_blks_hit{namespace="amp",job="amp-postgres-exporter",instance="i",datname="alert_history"}'
+        values: '0+10x1600'
+      - series: 'pg_stat_database_blks_read{namespace="amp",job="amp-postgres-exporter",instance="i",datname="alert_history"}'
+        values: '0+10x1600'
+      - series: 'pg_stat_user_tables_n_dead_tup{namespace="amp",job="amp-postgres-exporter",instance="i",datname="alert_history",schemaname="public",relname="alerts"}'
+        values: '20000x1600'
+      - series: 'pg_stat_user_tables_n_live_tup{namespace="amp",job="amp-postgres-exporter",instance="i",datname="alert_history",schemaname="public",relname="alerts"}'
+        values: '100x1600'
+      - series: 'pg_stat_user_tables_last_autovacuum{namespace="amp",job="amp-postgres-exporter",instance="i",datname="alert_history",schemaname="public",relname="alerts"}'
+        values: '0x1600'
+      - series: 'pg_stat_bgwriter_checkpoints_req_total{namespace="amp",job="amp-postgres-exporter",instance="i"}'
+        values: '0+1x1600'
+      - series: 'pg_stat_bgwriter_checkpoints_timed_total{namespace="amp",job="amp-postgres-exporter",instance="i"}'
+        values: '0x1600'
+      - series: 'pg_stat_bgwriter_buffers_backend_total{namespace="amp",job="amp-postgres-exporter",instance="i"}'
+        values: '0+1000x1600'
+      - series: 'pg_stat_bgwriter_buffers_checkpoint_total{namespace="amp",job="amp-postgres-exporter",instance="i"}'
+        values: '0x1600'
+    promql_expr_test:
+      - expr: count by (alertname) (ALERTS{alertstate="firing"})
+        eval_time: 26h
+        exp_samples:
+          - {labels: '{alertname="PostgreSQLDown"}', value: 1}
+          - {labels: '{alertname="PostgreSQLTooManyConnections"}', value: 1}
+          - {labels: '{alertname="PostgreSQLTxidExhaustionRisk"}', value: 1}
+          - {labels: '{alertname="PostgreSQLHighConnections"}', value: 1}
+          - {labels: '{alertname="PostgreSQLSlowQueries"}', value: 1}
+          - {labels: '{alertname="PostgreSQLHighCacheHitRatio"}', value: 1}
+          - {labels: '{alertname="PostgreSQLDeadTuplesHigh"}', value: 1}
+          - {labels: '{alertname="PostgreSQLVacuumOld"}', value: 1}
+          - {labels: '{alertname="PostgreSQLHighCheckpointRate"}', value: 1}
+          - {labels: '{alertname="PostgreSQLHighBufferBackendWrites"}', value: 1}
+
+  # The pod is gone: its series disappear, pg_up does not turn 0.
+  - interval: 1m
+    input_series:
+      - series: 'pg_up{namespace="other",job="other-exporter",instance="o"}'
+        values: '1x10'
+    promql_expr_test:
+      - expr: count by (alertname, namespace, job) (ALERTS{alertstate="firing"})
+        eval_time: 5m
+        exp_samples:
+          - {labels: '{alertname="PostgreSQLDown",namespace="amp",job="amp-postgres-exporter"}', value: 1}
+
+  # A healthy database stays quiet: a quiet table with an old autovacuum (the old
+  # PostgreSQLVacuumOld noise), a busy one vacuumed recently, and another
+  # database's bad series in the same Prometheus.
+  - interval: 1m
+    input_series:
+      - series: 'pg_up{namespace="amp",job="amp-postgres-exporter",instance="i"}'
+        values: '1x1600'
+      - series: 'pg_up{namespace="other",job="other-exporter",instance="o"}'
+        values: '0x1600'
+      - series: 'pg_stat_activity_count{namespace="amp",job="amp-postgres-exporter",instance="i",datname="alert_history",state="active"}'
+        values: '10x1600'
+      - series: 'pg_settings_max_connections{namespace="amp",job="amp-postgres-exporter",instance="i",server="localhost:5432"}'
+        values: '100x1600'
+      - series: 'pg_txid_wraparound_remaining_xids{namespace="amp",job="amp-postgres-exporter",instance="i",database="alert_history"}'
+        values: '2000000000x1600'
+      - series: 'pg_stat_database_blks_hit{namespace="amp",job="amp-postgres-exporter",instance="i",datname="alert_history"}'
+        values: '0+1000x1600'
+      - series: 'pg_stat_database_blks_read{namespace="amp",job="amp-postgres-exporter",instance="i",datname="alert_history"}'
+        values: '0+1x1600'
+      - series: 'pg_stat_user_tables_n_dead_tup{namespace="amp",job="amp-postgres-exporter",instance="i",datname="alert_history",schemaname="public",relname="quiet"}'
+        values: '40x1600'
+      - series: 'pg_stat_user_tables_n_live_tup{namespace="amp",job="amp-postgres-exporter",instance="i",datname="alert_history",schemaname="public",relname="quiet"}'
+        values: '100x1600'
+      - series: 'pg_stat_user_tables_last_autovacuum{namespace="amp",job="amp-postgres-exporter",instance="i",datname="alert_history",schemaname="public",relname="quiet"}'
+        values: '0x1600'
+      - series: 'pg_stat_user_tables_n_dead_tup{namespace="amp",job="amp-postgres-exporter",instance="i",datname="alert_history",schemaname="public",relname="busy"}'
+        values: '5000x1600'
+      - series: 'pg_stat_user_tables_n_live_tup{namespace="amp",job="amp-postgres-exporter",instance="i",datname="alert_history",schemaname="public",relname="busy"}'
+        values: '100x1600'
+      - series: 'pg_stat_user_tables_last_autovacuum{namespace="amp",job="amp-postgres-exporter",instance="i",datname="alert_history",schemaname="public",relname="busy"}'
+        values: '0+60x1600'
+      - series: 'pg_stat_bgwriter_checkpoints_req_total{namespace="amp",job="amp-postgres-exporter",instance="i"}'
+        values: '0x1600'
+      - series: 'pg_stat_bgwriter_checkpoints_timed_total{namespace="amp",job="amp-postgres-exporter",instance="i"}'
+        values: '0+1x1600'
+      - series: 'pg_stat_bgwriter_buffers_backend_total{namespace="amp",job="amp-postgres-exporter",instance="i"}'
+        values: '0+1x1600'
+      - series: 'pg_stat_bgwriter_buffers_checkpoint_total{namespace="amp",job="amp-postgres-exporter",instance="i"}'
+        values: '0x1600'
+    promql_expr_test:
+      - expr: count(ALERTS{alertstate="firing"})
+        eval_time: 26h
+        exp_samples: []

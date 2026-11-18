@@ -211,6 +211,48 @@ render rule-labels-reuse --set monitoring.prometheusRule=null
 doc "${WORK_DIR}/rule-labels-reuse.yaml" PrometheusRule amp-postgres >"${WORK_DIR}/rule-labels-reuse-pr.yaml"
 assert_contains "${WORK_DIR}/rule-labels-reuse-pr.yaml" "kind: PrometheusRule" "PrometheusRule renders without monitoring.prometheusRule"
 
+echo "PostgreSQL exporter ServiceMonitor (PG-EXPORTER-NO-SERVICEMONITOR):"
+PG_SM=amp-postgres-exporter
+PG_LABEL="app.kubernetes.io/component: database-exporter"
+doc "${WORK_DIR}/default.yaml" ServiceMonitor "${PG_SM}" >"${WORK_DIR}/pg-sm.yaml"
+assert_contains "${WORK_DIR}/pg-sm.yaml" "kind: ServiceMonitor" "rendered by default"
+assert_contains "${WORK_DIR}/pg-sm.yaml" "- port: metrics" "scrapes the metrics port"
+assert_contains "${WORK_DIR}/pg-sm.yaml" "interval: 30s" "takes the default interval"
+block "${WORK_DIR}/pg-sm.yaml" "  selector:" >"${WORK_DIR}/pg-sm-selector.yaml"
+pg_labels=()
+while IFS= read -r line; do
+  pg_labels+=("${line}")
+done < <(grep -E '^      [a-z]' "${WORK_DIR}/pg-sm-selector.yaml" | sed 's/^ *//')
+assert_contains "${WORK_DIR}/pg-sm-selector.yaml" "${PG_LABEL}" "selects by component"
+matched="$(services_matching "${WORK_DIR}/default.yaml" "${pg_labels[@]}" | tr '\n' ' ')"
+if [ "${matched}" = "${PG_SM} " ]; then pass "selector picks exactly: ${PG_SM}"; else fail "selector picks '${matched}', want '${PG_SM} '"; fi
+doc "${WORK_DIR}/labels.yaml" ServiceMonitor "${PG_SM}" >"${WORK_DIR}/pg-sm-labels.yaml"
+assert_contains "${WORK_DIR}/pg-sm-labels.yaml" "release: kube-prometheus" "takes monitoring.serviceMonitor.labels"
+assert_contains "${WORK_DIR}/pg-sm-labels.yaml" "interval: 15s" "takes monitoring.serviceMonitor.interval"
+# It and the rules on its scrape job come and go together.
+for off in postgresql.exporter.enabled postgresql.monitoring.serviceMonitor.enabled monitoring.prometheusEnabled; do
+  render pg-off --set "${off}=false"
+  doc "${WORK_DIR}/pg-off.yaml" ServiceMonitor "${PG_SM}" >"${WORK_DIR}/pg-off-sm.yaml"
+  doc "${WORK_DIR}/pg-off.yaml" PrometheusRule amp-postgres >"${WORK_DIR}/pg-off-pr.yaml"
+  assert_absent "${WORK_DIR}/pg-off-sm.yaml" "kind: ServiceMonitor" "no ServiceMonitor with ${off}=false"
+  assert_absent "${WORK_DIR}/pg-off-pr.yaml" "kind: PrometheusRule" "no rules with ${off}=false"
+done
+render pg-reuse --set postgresql.monitoring.serviceMonitor=null
+doc "${WORK_DIR}/pg-reuse.yaml" ServiceMonitor "${PG_SM}" >"${WORK_DIR}/pg-reuse-sm.yaml"
+assert_contains "${WORK_DIR}/pg-reuse-sm.yaml" "kind: ServiceMonitor" "rendered without the values key (--reuse-values)"
+
+echo "PostgreSQL NetworkPolicy lets the scrapers in on 9187:"
+assert_render_fails "policy without metricsScrapers would block the scrape" "networkPolicy.metricsScrapers" \
+  --set postgresql.networkPolicy.enabled=true
+render pg-np --set postgresql.networkPolicy.enabled=true \
+  --set 'networkPolicy.metricsScrapers[0].namespaceSelector.matchLabels.kubernetes\.io/metadata\.name=sema-monitoring'
+doc "${WORK_DIR}/pg-np.yaml" NetworkPolicy amp-postgres >"${WORK_DIR}/pg-np-obj.yaml"
+assert_contains "${WORK_DIR}/pg-np-obj.yaml" "kubernetes.io/metadata.name: sema-monitoring" "scrapers are in the policy"
+assert_contains "${WORK_DIR}/pg-np-obj.yaml" "port: 9187" "...on the exporter port"
+assert_absent "${WORK_DIR}/pg-np-obj.yaml" "name: monitoring" "the hardcoded namespace label is gone"
+render pg-np-nosm --set postgresql.networkPolicy.enabled=true --set postgresql.monitoring.serviceMonitor.enabled=false
+assert_contains "${WORK_DIR}/pg-np-nosm.yaml" "# Source: amp/templates/postgresql-networkpolicy.yaml" "no scrapers needed without the ServiceMonitor"
+
 echo "values without monitoring.serviceMonitor (--reuse-values from an old release):"
 # --set <key>=null deletes the key from the merged values -- what an old
 # release's stored values look like to this chart.
@@ -233,13 +275,13 @@ if helm template amp "${CHART_DIR}" "${ALL_MON[@]}" >"${WORK_DIR}/nocrd.yaml" 2>
 else
   fail "no CRDs: render failed: $(cat "${WORK_DIR}/nocrd.err")"
 fi
-# With the CRDs: AMP + Valkey ServiceMonitors, PostgreSQL + Valkey rules.
+# With the CRDs: AMP, PostgreSQL exporter and Valkey ServiceMonitors, PostgreSQL + Valkey rules.
 render withcrd "${ALL_MON[@]}"
 got="$(nocrd_kinds "${WORK_DIR}/withcrd.yaml")"
-if [ "${got}" = "4" ]; then pass "CRDs served: 4 monitoring objects"; else fail "CRDs served: got ${got} monitoring objects, want 4"; fi
+if [ "${got}" = "5" ]; then pass "CRDs served: 5 monitoring objects"; else fail "CRDs served: got ${got} monitoring objects, want 5"; fi
 if helm template amp "${CHART_DIR}" "${ALL_MON[@]}" --set monitoring.assumeCRDs=true >"${WORK_DIR}/assume.yaml" 2>"${WORK_DIR}/assume.err"; then
   got="$(nocrd_kinds "${WORK_DIR}/assume.yaml")"
-  if [ "${got}" = "4" ]; then pass "assumeCRDs: 4 monitoring objects without --api-versions"; else fail "assumeCRDs: got ${got}, want 4"; fi
+  if [ "${got}" = "5" ]; then pass "assumeCRDs: 5 monitoring objects without --api-versions"; else fail "assumeCRDs: got ${got}, want 5"; fi
 else
   fail "assumeCRDs: render failed: $(cat "${WORK_DIR}/assume.err")"
 fi
