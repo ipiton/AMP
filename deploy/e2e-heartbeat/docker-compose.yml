@@ -1,0 +1,36 @@
+# Dead man's switch e2e. Run through run.sh, which renders the configuration
+# from the chart and creates the secret file. Ports differ from deploy/smoke so
+# both can run at the same time.
+name: amp-heartbeat
+
+services:
+  webhook:
+    image: python:3-alpine
+    volumes:
+      - ../smoke/webhook_receiver.py:/app/webhook_receiver.py:ro
+    working_dir: /app
+    command: ["python3", "webhook_receiver.py"]
+    ports:
+      - "18190:8090"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/healthz', timeout=2)"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  amp:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    command:
+      - --config.file=/etc/amp/alertmanager.yml
+      - --storage.path=/data
+      - --cluster.listen-address=
+    volumes:
+      - ${AMP_HEARTBEAT_DIR:?run deploy/e2e-heartbeat/run.sh}/alertmanager.yml:/etc/amp/alertmanager.yml:ro
+      - ${AMP_HEARTBEAT_DIR:?run deploy/e2e-heartbeat/run.sh}/secrets:/etc/amp/secrets:ro
+    ports:
+      - "18180:9093"
+    depends_on:
+      webhook:
+        condition: service_healthy

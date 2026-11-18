@@ -1,0 +1,44 @@
+# Dead man's switch: the always-firing Watchdog alert pings an external check
+# (healthchecks.io or similar). If the pings stop, the external service raises
+# the alarm. See "Dead Man's Switch" in helm/amp/README.md.
+#
+# The ping URL is a capability secret, so it comes from a file:
+#
+#   kubectl -n amp create secret generic amp-notify \
+#     --from-file=heartbeat_url=./heartbeat-url
+#
+# Helm replaces lists instead of merging them. If your values already define
+# routes, receivers or extraVolumes, copy these entries into those lists.
+# Keep the Watchdog route ahead of any route that could also match it.
+extraVolumes:
+  - name: notify-secrets
+    secret:
+      secretName: amp-notify
+      defaultMode: 0440
+extraVolumeMounts:
+  - name: notify-secrets
+    mountPath: /etc/amp/secrets
+    readOnly: true
+
+alertmanager:
+  config:
+    route:
+      receiver: default
+      routes:
+        # In practice this pings every 3 minutes: the repeat interval is
+        # checked on group_interval ticks. Keep the check's period above that.
+        - receiver: heartbeat
+          matchers:
+            - alertname="Watchdog"
+          group_wait: 0s
+          group_interval: 1m
+          repeat_interval: 2m
+          continue: false
+    receivers:
+      - name: default
+      - name: heartbeat
+        webhook_configs:
+          - url_file: /etc/amp/secrets/heartbeat_url
+            # A resolved Watchdog means Prometheus stopped sending it. Sending
+            # that notification would count as a successful ping.
+            send_resolved: false
