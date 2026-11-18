@@ -33,11 +33,11 @@ based_on:
 ## Phase 2: Ревью и тесты
 
 - [x] **2.1** deep-review, `review-verdict.json` с `gate: pass`
-- [ ] **2.2** `render-operator-source.sh` <!-- depends: 2.1 | verify: скрипт зелёный -->
+- [x] **2.2** `render-operator-source.sh`, `reload_listener_test.go` <!-- depends: 2.1 | verify: скрипт зелёный -->
 
 ## Phase 3: Документация и гейты
 
-- [ ] **3.1** ADR-020, README, CHANGELOG, отчёт спайка
+- [x] **3.1** ADR-020, README, CHANGELOG, отчёт спайка
 - [ ] **3.2** `scripts/release-gate.sh`, `git diff --check`
 
 ## Definition of Done
