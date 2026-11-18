@@ -1,0 +1,4 @@
+helm-tests       PASS   20s      helm/amp/tests/*.sh render tests
+amtool-compat    PASS   23s      real amtool CLI vs deploy/smoke stack
+[release-gate] ==================================================
+[release-gate] RESULT: PASS

@@ -1,0 +1,4 @@
+# Pilot in sema-prod, step 3: AMP requires basic auth. Apply only after every
+# client sends credentials. Needs Secret amp/amp-web-config. Restarts amp-0.
+webConfig:
+  existingSecret: amp-web-config

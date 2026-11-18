@@ -1,0 +1,46 @@
+### final pass with the exact Loki values from sema.diff
+partitioned roll out complete: 1 new pods have been updated...
+statefulset rolling update complete 1 pods at revision amp-69f85fbf9d...
+pod/amp-0 condition met
+### final: policy + auth + Loki values from sema.diff
+--- POST /api/v2/alerts without credentials (Service / pod)
+  default/probe-default                         000 / 000
+  sema-monitoring/probe-monitoring-unlabeled    000 / 000
+  amp/probe-amp-ns                              000 / 000
+  default/probe-hostnet                         401 / 401
+  sema-monitoring/probe-allowed                 401 / 401
+--- from the allowed pod
+  POST silences, no credentials:   401
+  GET  /metrics, no credentials:   401
+  GET  /-/healthy, no credentials: 200
+  GET  /-/ready, no credentials:   200
+  POST alerts, valid credentials:  200
+  POST alerts, wrong password:     401
+--- AMP pod
+true   0     2026-11-18T08:18:58Z
+--- alerts held by AMP (name, updatedAt)
+  now 2026-11-18T08:21:26Z
+   LabPrometheusAlways 2026-11-18T08:20:48.415Z
+   LabLokiAlways 2026-11-18T08:20:45.101Z
+--- Prometheus
+  up{namespace=amp}:
+    {'instance': '10.42.0.26:9093', 'job': 'amp'} 1
+  notifications sent:
+    {'alertmanager': 'http://10.42.0.8:9093/api/v2/alerts', 'instance': '10.42.0.22:9090', 'job': 'kube-prometheus-stack-prometheus'} 9
+    {'alertmanager': 'http://amp.amp.svc:9093/api/v2/alerts', 'instance': '10.42.0.22:9090', 'job': 'kube-prometheus-stack-prometheus'} 9
+  notification errors:
+    {'alertmanager': 'http://10.42.0.8:9093/api/v2/alerts', 'instance': '10.42.0.22:9090', 'job': 'kube-prometheus-stack-prometheus'} 0
+    {'alertmanager': 'http://amp.amp.svc:9093/api/v2/alerts', 'instance': '10.42.0.22:9090', 'job': 'kube-prometheus-stack-prometheus'} 0
+  notifications dropped:
+    {'instance': '10.42.0.22:9090', 'job': 'kube-prometheus-stack-prometheus'} 0
+--- Loki ruler (per Alertmanager)
+  loki_prometheus_notifications_dropped_total{user="fake"} 0
+  loki_prometheus_notifications_errors_total{alertmanager="http://amp.amp.svc:9093/api/v2/alerts",user="fake"} 0
+  loki_prometheus_notifications_errors_total{alertmanager="http://kube-prometheus-stack-alertmanager.sema-monitoring.svc.cluster.local:9093/api/v2/alert
+  loki_prometheus_notifications_sent_total{alertmanager="http://amp.amp.svc:9093/api/v2/alerts",user="fake"} 10
+  loki_prometheus_notifications_sent_total{alertmanager="http://kube-prometheus-stack-alertmanager.sema-monitoring.svc.cluster.local:9093/api/v2/alerts"
+--- Loki per Alertmanager, full
+loki_prometheus_notifications_errors_total{am=amp,user="fake"} 0
+loki_prometheus_notifications_errors_total{am=kube-prometheus-stack-alertmanager,user="fake"} 0
+loki_prometheus_notifications_sent_total{am=amp,user="fake"} 10
+loki_prometheus_notifications_sent_total{am=kube-prometheus-stack-alertmanager,user="fake"} 10

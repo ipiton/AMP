@@ -1,0 +1,27 @@
+# Pilot in sema-prod, step 1: only Prometheus and the Loki ruler reach the web
+# port (9093). Clients stay as they are. See ROLLOUT.md.
+networkPolicy:
+  enabled: true
+  alertSenders:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: sema-monitoring
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: prometheus
+          app.kubernetes.io/instance: kube-prometheus-stack-prometheus
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: sema-monitoring
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: loki
+          app.kubernetes.io/instance: loki
+  metricsScrapers:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: sema-monitoring
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: prometheus
+          app.kubernetes.io/instance: kube-prometheus-stack-prometheus

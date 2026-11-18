@@ -1,0 +1,30 @@
+### step 1: NetworkPolicy, no auth
+--- POST /api/v2/alerts without credentials (Service / pod)
+  default/probe-default                         000 / 000
+  sema-monitoring/probe-monitoring-unlabeled    000 / 000
+  amp/probe-amp-ns                              000 / 000
+  default/probe-hostnet                         200 / 200
+  sema-monitoring/probe-allowed                 200 / 200
+--- from the allowed pod
+  POST silences, no credentials:   200
+  GET  /metrics, no credentials:   200
+  GET  /-/healthy, no credentials: 200
+  GET  /-/ready, no credentials:   200
+--- AMP pod
+true   0     2026-11-18T08:07:31Z
+--- alerts held by AMP (name, updatedAt)
+  now 2026-11-18T08:08:24Z
+   LabPrometheusAlways 2026-11-18T08:08:03.417Z
+   LabLokiAlways 2026-11-18T08:08:14.952Z
+--- Prometheus
+  up{namespace=amp}:
+    {'instance': '10.42.0.18:9093', 'job': 'amp'} 1
+  notifications sent:
+    {'alertmanager': 'http://10.42.0.8:9093/api/v2/alerts', 'instance': '10.42.0.9:9090', 'job': 'kube-prometheus-stack-prometheus'} 10
+    {'alertmanager': 'http://amp.amp.svc:9093/api/v2/alerts', 'instance': '10.42.0.9:9090', 'job': 'kube-prometheus-stack-prometheus'} 10
+  notification errors:
+    {'alertmanager': 'http://10.42.0.8:9093/api/v2/alerts', 'instance': '10.42.0.9:9090', 'job': 'kube-prometheus-stack-prometheus'} 0
+    {'alertmanager': 'http://amp.amp.svc:9093/api/v2/alerts', 'instance': '10.42.0.9:9090', 'job': 'kube-prometheus-stack-prometheus'} 9
+  notifications dropped:
+    {'instance': '10.42.0.9:9090', 'job': 'kube-prometheus-stack-prometheus'} 0
+--- Loki ruler (per Alertmanager)
