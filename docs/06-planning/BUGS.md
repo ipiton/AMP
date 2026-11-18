@@ -83,7 +83,7 @@
 - **Impact:** мониторинг встроенного PostgreSQL выглядит включённым, но не работает; находки `PG-ALERT-RULES-METRICS` на живом кластере даже не проявляются.
 - **Fix:** ServiceMonitor для exporter'а под `postgresql.exporter.enabled` + гейт `amp.monitoringCRDs`, `monitoring.serviceMonitor.labels`, порт `metrics`; NetworkPolicy PG пропускает `networkPolicy.metricsScrapers` на 9187; render-тест; проверка на k3s, что `pg_up` появился и правила вычисляются.
 - **Refs:** промежуточный срез пилота 2026-11-14 (`AMP-PILOT-WEEK-REVIEW`); связано с `PG-ALERT-RULES-METRICS`, BACKLOG `PG-MONITORING-CHECKS`.
-- **Status:** исправлено в ветке `claude/amp-postgres-ops-6925b8`, проверено на k3s (`tasks/AMP-PG-OPS/evidence.md`); ждёт мержа и выкатки
+- **Status:** исправлено в `main`, проверено на k3s (`tasks/AMP-PG-OPS/evidence.md`); ждёт выкатки
 
 ### [medium][Helm][~0.5d] PG-ALERT-RULES-METRICS
 - **Title:** часть правил `postgresql.rules` ссылается на метрики, которых exporter не отдаёт, а `PostgreSQLVacuumOld` шумит
@@ -91,7 +91,7 @@
 - **Impact:** операторы считают, что насыщение соединений, wraparound и медленные запросы под алертами, а их нет; плюс постоянный шум VacuumOld на тихих таблицах.
 - **Fix:** сверить каждое правило с `/metrics` exporter'а (или включить нужные коллекторы), для VacuumOld учитывать `n_dead_tup`/`n_mod_since_analyze` или убрать; `promtool test rules` на каждое правило — вместе с BACKLOG `PG-MONITORING-CHECKS`.
 - **Refs:** `tasks/archive/PG-CONFIG-FIX/review-findings.md` R3, R13; `evidence/k3d-acceptance.md` K1.3.
-- **Status:** исправлено в ветке `claude/amp-postgres-ops-6925b8` (`tasks/AMP-PG-OPS/evidence.md`); ждёт мержа и выкатки
+- **Status:** исправлено в `main` (`tasks/AMP-PG-OPS/evidence.md`); ждёт выкатки
 
 ### [high][Helm][~0.25d] AMP-START-BLOCKED-BY-PG
 - **Title:** AMP, перезапущенный при лежащем встроенном PostgreSQL, около трёх минут не принимает и не доставляет алерты
