@@ -1,4 +1,9 @@
-{{- if and .Values.postgresql.enabled .Values.postgresql.monitoring.prometheusRules.enabled (include "amp.monitoringCRDs" .) }}
+{{- if and .Values.postgresql.monitoring.prometheusRules.enabled (include "amp.postgresql.exporterScraped" .) }}
+{{- /* Scoped to this release's scrape job: a shared Prometheus also holds the
+pg_* series of other databases. The expressions use the metrics of
+postgres-exporter v0.15.0 against PostgreSQL 16, listed with the queries of
+postgresql-exporter-configmap.yaml in tests/postgresql-exporter-metrics.txt. */ -}}
+{{- $sel := printf "namespace=%q,job=%q" (.Values.namespace | default .Release.Namespace) (printf "%s-exporter" (include "amp.postgresql.fullname" .)) }}
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -19,71 +24,63 @@ spec:
     # ========================================
     # CRITICAL ALERTS (Page immediately)
     # ========================================
+    # The exporter is a sidecar: when the whole pod is gone pg_up does not turn
+    # 0, it disappears.
     - alert: PostgreSQLDown
-      expr: pg_up == 0
-      for: 1m
+      expr: pg_up{ {{- $sel -}} } == 0 or absent(pg_up{ {{- $sel -}} })
+      for: 2m
       labels:
         severity: critical
         component: database
       annotations:
-        summary: "PostgreSQL instance is down (instance {{ "{{" }} $labels.instance {{ "}}" }})"
-        description: "PostgreSQL instance {{ "{{" }} $labels.instance {{ "}}" }} has been down for more than 1 minute."
+        summary: "PostgreSQL is down (namespace {{ "{{" }} $labels.namespace {{ "}}" }})"
+        description: "PostgreSQL in {{ "{{" }} $labels.namespace {{ "}}" }} or its exporter has been unavailable for more than 2 minutes. Alert history is not being written."
 
     - alert: PostgreSQLTooManyConnections
-      expr: sum by (instance) (pg_stat_activity_count) > (pg_settings_max_connections * 0.9)
+      expr: sum by (namespace, job) (pg_stat_activity_count{ {{- $sel -}} }) > max by (namespace, job) (pg_settings_max_connections{ {{- $sel -}} }) * 0.9
       for: 5m
       labels:
         severity: critical
         component: database
       annotations:
-        summary: "PostgreSQL connection pool near capacity (instance {{ "{{" }} $labels.instance {{ "}}" }})"
-        description: "PostgreSQL instance {{ "{{" }} $labels.instance {{ "}}" }} is using {{ "{{" }} $value {{ "}}" }} connections (>90% of max_connections)."
-
-    - alert: PostgreSQLReplicationLag
-      expr: pg_replication_lag > 300
-      for: 5m
-      labels:
-        severity: critical
-        component: database
-      annotations:
-        summary: "PostgreSQL replication lag is high (instance {{ "{{" }} $labels.instance {{ "}}" }})"
-        description: "PostgreSQL replication lag on {{ "{{" }} $labels.instance {{ "}}" }} is {{ "{{" }} $value {{ "}}" }} seconds."
+        summary: "PostgreSQL connections near capacity (namespace {{ "{{" }} $labels.namespace {{ "}}" }})"
+        description: "PostgreSQL is using {{ "{{" }} $value {{ "}}" }} connections (>90% of max_connections)."
 
     - alert: PostgreSQLTxidExhaustionRisk
-      expr: (2147483648 - pg_database_age_seconds) / 2147483648 < 0.1
+      expr: pg_txid_wraparound_remaining_xids{ {{- $sel -}} } / 2147483648 < 0.1
       for: 5m
       labels:
         severity: critical
         component: database
       annotations:
-        summary: "PostgreSQL transaction ID wraparound risk (database {{ "{{" }} $labels.datname {{ "}}" }})"
-        description: "Database {{ "{{" }} $labels.datname {{ "}}" }} has less than 10% transaction IDs remaining before wraparound."
+        summary: "PostgreSQL transaction ID wraparound risk (database {{ "{{" }} $labels.database {{ "}}" }})"
+        description: "Database {{ "{{" }} $labels.database {{ "}}" }} has less than 10% transaction IDs remaining before wraparound."
 
     # ========================================
     # WARNING ALERTS (Investigate soon)
     # ========================================
     - alert: PostgreSQLHighConnections
-      expr: sum by (instance) (pg_stat_activity_count) > (pg_settings_max_connections * 0.8)
+      expr: sum by (namespace, job) (pg_stat_activity_count{ {{- $sel -}} }) > max by (namespace, job) (pg_settings_max_connections{ {{- $sel -}} }) * 0.8
       for: 10m
       labels:
         severity: warning
         component: database
       annotations:
-        summary: "PostgreSQL connection usage is high (instance {{ "{{" }} $labels.instance {{ "}}" }})"
-        description: "PostgreSQL instance {{ "{{" }} $labels.instance {{ "}}" }} is using {{ "{{" }} $value {{ "}}" }} connections (>80% of max_connections)."
+        summary: "PostgreSQL connection usage is high (namespace {{ "{{" }} $labels.namespace {{ "}}" }})"
+        description: "PostgreSQL is using {{ "{{" }} $value {{ "}}" }} connections (>80% of max_connections)."
 
     - alert: PostgreSQLSlowQueries
-      expr: rate(pg_stat_statements_mean_exec_time_seconds[5m]) > 1
-      for: 10m
+      expr: pg_long_running_queries_duration_seconds{ {{- $sel -}} } > 60
+      for: 5m
       labels:
         severity: warning
         component: database
       annotations:
-        summary: "PostgreSQL slow queries detected (instance {{ "{{" }} $labels.instance {{ "}}" }})"
-        description: "PostgreSQL instance {{ "{{" }} $labels.instance {{ "}}" }} has slow queries (mean execution time {{ "{{" }} $value {{ "}}" }}s)."
+        summary: "PostgreSQL has a long-running query (database {{ "{{" }} $labels.database {{ "}}" }})"
+        description: "A query or open transaction of {{ "{{" }} $labels.user {{ "}}" }} in state {{ "{{" }} $labels.state {{ "}}" }} has been running for {{ "{{" }} $value {{ "}}" }} seconds."
 
     - alert: PostgreSQLHighCacheHitRatio
-      expr: rate(pg_stat_database_blks_hit[5m]) / (rate(pg_stat_database_blks_hit[5m]) + rate(pg_stat_database_blks_read[5m])) < 0.9
+      expr: rate(pg_stat_database_blks_hit{ {{- $sel -}} ,datname={{ .Values.postgresql.database | quote }}}[5m]) / (rate(pg_stat_database_blks_hit{ {{- $sel -}} ,datname={{ .Values.postgresql.database | quote }}}[5m]) + rate(pg_stat_database_blks_read{ {{- $sel -}} ,datname={{ .Values.postgresql.database | quote }}}[5m])) < 0.9
       for: 10m
       labels:
         severity: warning
@@ -93,7 +90,7 @@ spec:
         description: "Database {{ "{{" }} $labels.datname {{ "}}" }} has cache hit ratio of {{ "{{" }} $value {{ "}}" }} (<90%)."
 
     - alert: PostgreSQLDeadTuplesHigh
-      expr: pg_stat_user_tables_n_dead_tup > 10000
+      expr: pg_stat_user_tables_n_dead_tup{ {{- $sel -}} } > 10000
       for: 30m
       labels:
         severity: warning
@@ -102,37 +99,41 @@ spec:
         summary: "PostgreSQL dead tuples are high (table {{ "{{" }} $labels.schemaname {{ "}}" }}.{{ "{{" }} $labels.relname {{ "}}" }})"
         description: "Table {{ "{{" }} $labels.schemaname {{ "}}" }}.{{ "{{" }} $labels.relname {{ "}}" }} has {{ "{{" }} $value {{ "}}" }} dead tuples. Consider manual VACUUM."
 
+    # Age alone is noise: autovacuum rightly skips a table with few changes. Fire
+    # only when the table is past the autovacuum trigger (threshold 50, scale
+    # factor 0.2, postgresql-configmap.yaml) and autovacuum still has not run.
     - alert: PostgreSQLVacuumOld
-      expr: (time() - pg_stat_user_tables_last_autovacuum) > 86400 and pg_stat_user_tables_last_autovacuum > 0
+      expr: pg_stat_user_tables_n_dead_tup{ {{- $sel -}} } > 1000 and pg_stat_user_tables_n_dead_tup{ {{- $sel -}} } > 50 + 0.2 * pg_stat_user_tables_n_live_tup{ {{- $sel -}} } and (time() - pg_stat_user_tables_last_autovacuum{ {{- $sel -}} }) > 86400
       for: 1h
       labels:
         severity: warning
         component: database
       annotations:
-        summary: "PostgreSQL table not vacuumed recently (table {{ "{{" }} $labels.schemaname {{ "}}" }}.{{ "{{" }} $labels.relname {{ "}}" }})"
-        description: "Table {{ "{{" }} $labels.schemaname {{ "}}" }}.{{ "{{" }} $labels.relname {{ "}}" }} has not been vacuumed for {{ "{{" }} $value {{ "}}" }} seconds."
+        summary: "PostgreSQL autovacuum is not keeping up (table {{ "{{" }} $labels.schemaname {{ "}}" }}.{{ "{{" }} $labels.relname {{ "}}" }})"
+        description: "Table {{ "{{" }} $labels.schemaname {{ "}}" }}.{{ "{{" }} $labels.relname {{ "}}" }} has {{ "{{" }} $value {{ "}}" }} dead tuples, past the autovacuum trigger, and no autovacuum for more than a day."
 
     # ========================================
     # PERFORMANCE ALERTS
     # ========================================
+    # Over 1h: with few checkpoints in a 5m window the ratio is 0/0 or x/0.
     - alert: PostgreSQLHighCheckpointRate
-      expr: rate(pg_stat_bgwriter_checkpoints_req[5m]) / rate(pg_stat_bgwriter_checkpoints_timed[5m]) > 0.5
+      expr: increase(pg_stat_bgwriter_checkpoints_req_total{ {{- $sel -}} }[1h]) / (increase(pg_stat_bgwriter_checkpoints_req_total{ {{- $sel -}} }[1h]) + increase(pg_stat_bgwriter_checkpoints_timed_total{ {{- $sel -}} }[1h])) > 0.5
       for: 10m
       labels:
         severity: warning
         component: database
       annotations:
-        summary: "PostgreSQL checkpoint rate is high (instance {{ "{{" }} $labels.instance {{ "}}" }})"
+        summary: "PostgreSQL checkpoint rate is high (namespace {{ "{{" }} $labels.namespace {{ "}}" }})"
         description: "More than 50% of checkpoints are being requested (not timed). Consider increasing checkpoint_timeout or max_wal_size."
 
     - alert: PostgreSQLHighBufferBackendWrites
-      expr: rate(pg_stat_bgwriter_buffers_backend[5m]) > rate(pg_stat_bgwriter_buffers_checkpoint[5m]) * 0.3
+      expr: rate(pg_stat_bgwriter_buffers_backend_total{ {{- $sel -}} }[5m]) > 10 and rate(pg_stat_bgwriter_buffers_backend_total{ {{- $sel -}} }[5m]) > rate(pg_stat_bgwriter_buffers_checkpoint_total{ {{- $sel -}} }[5m]) * 0.3
       for: 10m
       labels:
         severity: warning
         component: database
       annotations:
-        summary: "PostgreSQL backend writes are high (instance {{ "{{" }} $labels.instance {{ "}}" }})"
-        description: "Backends are writing {{ "{{" }} $value {{ "}}" }} buffers directly. Consider increasing shared_buffers."
+        summary: "PostgreSQL backend writes are high (namespace {{ "{{" }} $labels.namespace {{ "}}" }})"
+        description: "Backends are writing {{ "{{" }} $value {{ "}}" }} buffers per second directly. Consider increasing shared_buffers."
 
 {{- end }}

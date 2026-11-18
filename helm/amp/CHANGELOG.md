@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Breaking changes / migration notes
+- **PG-EXPORTER-NO-SERVICEMONITOR**: `postgresql.networkPolicy.enabled=true` now needs `networkPolicy.metricsScrapers` while the exporter ServiceMonitor is on; the render fails otherwise. The old hardcoded rule (namespace label `name: monitoring`, pod label `app: prometheus`) is gone. Set the scrapers, or `postgresql.monitoring.serviceMonitor.enabled=false`.
+- **PG-ALERT-RULES-METRICS**: the `amp-postgres` rules render only together with the ServiceMonitor. `PostgreSQLReplicationLag` is removed: the bundled PostgreSQL has no replication (ADR-016).
+- The first upgrade restarts the bundled PostgreSQL once: the StatefulSet gains a checksum of the exporter queries.
+
+### Fixed
+- **PG-EXPORTER-NO-SERVICEMONITOR**: the chart renders a ServiceMonitor for the PostgreSQL exporter; before, no `pg_*` metric reached Prometheus and every `amp-postgres` rule was blind.
+- **PG-ALERT-RULES-METRICS**: all rules use metrics the exporter serves and are scoped to the release's scrape job. `PostgreSQLDown` fires when the exporter's series are absent. `PostgreSQLSlowQueries` watches long-running queries. `PostgreSQLVacuumOld` fires only for a table past the autovacuum trigger. The `pg_long_running_queries` query returns one row per user, database and state, so two long queries no longer produce duplicate series.
+
 ### Added
 - **AMCFG-OPERATOR-SOURCE** (2026-11-18): `alertmanager.configSource: operator` takes `alertmanager.yml` from prometheus-operator, so `AlertmanagerConfig` resources reach AMP. The chart creates an `Alertmanager` resource with `replicas: 0` and a base-config Secret, mounts `alertmanager-<fullname>-generated`, and runs `prometheus-config-reloader` as an init container and a sidecar. The default, `values`, is unchanged. `alertmanager.operator.prepare` creates the resource first, so the switch can be checked before pods change. The generated Secret holds `AlertmanagerConfig` credentials in plain text, so the render refuses publishing target discovery in this mode. The reloader carries no credentials and calls `--web.reload-listen-address`, a new loopback-only listener that serves just `POST /-/reload` and reloads only when the config file changed, so this mode needs an image newer than `0.1.0`; `/-/reload` on the main port stays behind authentication (ADR-020).
 - **HELM-PROMRULE-LABELS** (2026-11-09): `monitoring.prometheusRule.labels` adds labels to the chart's `PrometheusRule`s (PostgreSQL, Valkey), and `monitoring.serviceMonitor.labels` now also lands on the Valkey ServiceMonitor. kube-prometheus-stack loads rules only with `release: <its release name>`, so the chart's alerts were silently ignored there.

@@ -66,7 +66,8 @@ helm install amp ./helm/amp
 - LLM classification and investigation when `llm.enabled` / `investigation.enabled` are set
 - Publishing targets discovered from Kubernetes Secrets (`publishing.*`, see [RBAC](#rbac))
 - No Valkey by default: `amp-upstream` does not use it yet ([Valkey](#valkey))
-- If PostgreSQL is unreachable when a pod starts, the pod runs without history and investigations until it is restarted; alert delivery does not depend on the database
+- A running pod keeps accepting and delivering alerts while PostgreSQL is down. History events of that time are lost; an alert that is still firing gets its row back on the next resend from Prometheus
+- A pod that starts while the bundled PostgreSQL is down waits for it for up to 120 s in `wait-for-postgres` and accepts no alerts meanwhile. It then runs without history and investigations until it is restarted, even after PostgreSQL returns
 
 ### Lite Profile
 The upstream core alone:
@@ -176,6 +177,8 @@ The standard profile uses PostgreSQL for alert history and investigations; the c
 The bundled PostgreSQL (`postgres:16.15`) is a single instance without replication. It has no PodDisruptionBudget and no backup job. A pod restart, node drain or upgrade that touches it means database downtime. The chart fails to render if `postgresql.replicas` is not `1` (several replicas would be independent databases behind one Service) or if `postgresql.backup.enabled` is `true` (the bundled backup was removed).
 
 The server runs with `postgresql.config` (rendered into `postgresql.conf`) and the chart's `pg_hba.conf`, passed as server arguments, so they also apply to an existing data volume. Each AMP pod opens up to 25 connections (`database.max_connections`), so `postgresql.config.maxConnections` must be at least `alertmanager.replicas` × 25 + 5 (the exporter and a few `psql` sessions). AMP connects as `postgresql.username`, the bootstrap superuser, so `superuserReservedConnections` holds nothing back from it. The default 100 covers 3 AMP pods (a StatefulSet rolls without a surge pod) and the exporter; NOTES warns when the budget is short. Before raising `alertmanager.replicas` above 3, raise it to at least `replicas` × 25 + 5, together with `sharedBuffers` and `postgresql.resources` (the default limit is 1Gi with `shared_buffers=128MB`). From the network, `pg_hba.conf` admits only `postgresql.username` to `postgresql.database` with a SCRAM password and rejects everything else, including replication; loopback inside the pod (and `kubectl port-forward`) needs the password too, only `kubectl exec … psql` over the Unix socket does not; to restrict which pods may connect, enable `postgresql.networkPolicy.enabled`. `/dev/shm` is a 256Mi memory volume and counts against `postgresql.resources.limits.memory`.
+
+With `monitoring.prometheusEnabled` and the prometheus-operator CRDs, the chart scrapes the exporter sidecar with a ServiceMonitor (`postgresql.monitoring.serviceMonitor.enabled`; interval and labels come from `monitoring.serviceMonitor`) and installs alert rules scoped to that scrape job. `PostgreSQLDown` also fires when the exporter's metrics disappear, which is what happens when the whole pod is gone. With `postgresql.networkPolicy.enabled`, list your Prometheus in `networkPolicy.metricsScrapers`: the policy admits it on port 9187, and the chart refuses to render without it.
 
 #### External PostgreSQL
 

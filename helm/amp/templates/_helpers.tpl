@@ -210,3 +210,16 @@ Without it a default install on a cluster without the CRDs fails with
 {{- define "amp.monitoringCRDs" -}}
 {{- if or (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") (dig "assumeCRDs" false (.Values.monitoring | default dict)) }}true{{ end }}
 {{- end }}
+
+{{/*
+Non-empty when the chart makes Prometheus scrape the bundled PostgreSQL's
+exporter: the ServiceMonitor renders. The PostgreSQL alert rules depend on it
+(their selector is that scrape job, and PostgreSQLDown fires on absent metrics),
+and so does the guard in the PostgreSQL NetworkPolicy.
+Nil-safe for `helm upgrade --reuse-values` from a chart without these keys.
+*/}}
+{{- define "amp.postgresql.exporterScraped" -}}
+{{- $pg := .Values.postgresql -}}
+{{- $mon := .Values.monitoring | default dict -}}
+{{- if and $pg.enabled $pg.exporter.enabled $mon.prometheusEnabled (dig "monitoring" "serviceMonitor" "enabled" true $pg) (include "amp.monitoringCRDs" .) }}true{{ end }}
+{{- end }}

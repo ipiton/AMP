@@ -11,7 +11,7 @@ AMP's alerting core is not a reimplementation: the `amp-upstream` binary is buil
 ## Features
 
 - **Upstream Alertmanager core**: your `alertmanager.yml` as it is, `amtool`, the Grafana Alertmanager data source and [karma](https://github.com/prymitive/karma) work as with upstream. What differs is listed in [docs/ALERTMANAGER_COMPATIBILITY.md](docs/ALERTMANAGER_COMPATIBILITY.md).
-- **Alert history** in PostgreSQL: every alert the core accepts, firing and resolved, silenced and inhibited ones included, written off the ingest path. Delivery does not depend on PostgreSQL.
+- **Alert history** in PostgreSQL: every alert the core accepts, firing and resolved, silenced and inhibited ones included, written off the ingest path. A running AMP keeps delivering while PostgreSQL is down.
 - **LLM classification**: each firing alert is classified asynchronously; a notification waits up to `llm.notify_wait` (default 5s) and carries the result in `llm_*` annotations, so templates can use it. Optional: drop alerts classified as noise (`llm.drop_noise`, off by default). Bring your own OpenAI-compatible endpoint and key.
 - **Investigation**: an LLM investigation per firing incident, optionally agentic with Prometheus, Loki, Kubernetes and PostgreSQL tools and runbooks.
 - **Kubernetes-Secret targets**: Secrets labelled `publishing-target=true` become webhook, Slack or PagerDuty integrations of your receivers, without putting credentials in `alertmanager.yml`.
