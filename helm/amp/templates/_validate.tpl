@@ -59,4 +59,29 @@ they configured (routes in configFile.content, upstreamCore.config).
 {{- end }}
 {{- end }}
 {{- end }}
+{{- $source := $am.configSource | default "values" }}
+{{- if not (has $source (list "values" "operator")) }}
+{{- fail (printf "alertmanager.configSource must be values or operator, got %q." $source) }}
+{{- end }}
+{{- if include "amp.operatorResources" . }}
+{{- $op := $am.operator | default dict }}
+{{- if not (and $op.version (dig "reloader" "image" "repository" "" $op) (dig "reloader" "image" "tag" "" $op)) }}
+{{- fail "alertmanager.configSource=operator needs alertmanager.operator.version and reloader.image.repository and .tag: with helm upgrade use --reset-then-reuse-values (Helm >= 3.14) or a values file for this chart, not --reuse-values." }}
+{{- end }}
+{{- if not (or (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/Alertmanager") (dig "assumeCRDs" false (.Values.monitoring | default dict))) }}
+{{- fail "alertmanager.configSource=operator needs prometheus-operator: the cluster does not serve monitoring.coreos.com/v1 Alertmanager. Install it, or for a render without a cluster pass --api-versions monitoring.coreos.com/v1/Alertmanager or set monitoring.assumeCRDs=true." }}
+{{- end }}
+{{- /* The operator also creates StatefulSet alertmanager-<fullname>: with a long name it fails and the resource stays Reconciled=False. 50 is the longest length verified. */}}
+{{- if gt (len (include "amp.fullname" .)) 50 }}
+{{- fail (printf "alertmanager.configSource=operator (or alertmanager.operator.prepare) needs a release full name of at most 50 characters, got %d: set fullnameOverride." (len (include "amp.fullname" .))) }}
+{{- end }}
+{{- /* Image 0.1.0 has no --web.reload-listen-address and would exit at start. */}}
+{{- if and (include "amp.operatorConfigSource" .) (regexMatch "^v?0\\.1\\.0(@.*)?$" (toString (.Values.image.tag | default .Chart.AppVersion))) }}
+{{- fail "alertmanager.configSource=operator needs an AMP image newer than 0.1.0 (--web.reload-listen-address): set image.tag." }}
+{{- end }}
+{{- /* The generated Secret holds AlertmanagerConfig credentials. RBAC cannot filter `list` by label, and a token mounted at pod level would also reach the reloader container (ADR-012, ADR-020). */}}
+{{- if include "amp.discoveryEnabled" . }}
+{{- fail "alertmanager.configSource=operator (or alertmanager.operator.prepare) cannot be combined with publishing target discovery: the generated Secret holds AlertmanagerConfig credentials, and the pod must not carry a Kubernetes API token. Set publishing.enabled=false." }}
+{{- end }}
+{{- end }}
 {{- end }}

@@ -83,6 +83,7 @@ publishing:
 | `--web.listen-address` | `:9093` | |
 | `--web.external-url` | empty | Its path prefixes every route, `/api/amp/v1` and the probes included |
 | `--web.config.file` | empty | Upstream web config: basic auth |
+| `--web.reload-listen-address` | empty | Loopback IP and port of an extra listener serving only `POST /-/reload` without authentication, for a config reloader in the same pod |
 | `--cluster.listen-address` | `0.0.0.0:9094` | Empty turns gossip off |
 | `--cluster.peer`, `--cluster.advertise-address`, `--cluster.peer-timeout`, `--cluster.label`, `--cluster.tls-config`, … | upstream's | HA |
 

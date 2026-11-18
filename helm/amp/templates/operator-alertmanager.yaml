@@ -1,0 +1,49 @@
+{{- include "amp.validate" . }}
+{{- /*
+alertmanager.configSource=operator (ADR-020): prometheus-operator merges the base
+config with the selected AlertmanagerConfig resources into Secret
+alertmanager-<fullname>-generated. replicas: 0, so it runs no Alertmanager of its
+own; the AMP pods mount that Secret.
+*/}}
+{{- if include "amp.operatorResources" . }}
+{{- $fullname := include "amp.fullname" . }}
+{{- $ns := include "amp.namespace" . }}
+{{- $op := .Values.alertmanager.operator }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $fullname }}-operator-base
+  namespace: {{ $ns }}
+  labels:
+    {{- include "amp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: alertmanager-config
+type: Opaque
+data:
+  alertmanager.yaml: {{ toYaml .Values.alertmanager.config | b64enc | quote }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Alertmanager
+metadata:
+  name: {{ $fullname }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "amp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: alertmanager-config
+spec:
+  replicas: 0
+  version: {{ $op.version | quote }}
+  configSecret: {{ $fullname }}-operator-base
+  {{- /* Absent and {} differ: absent selects nothing (or, for namespaces, the own one), {} selects everything. */}}
+  {{- if kindIs "map" $op.alertmanagerConfigSelector }}
+  alertmanagerConfigSelector:
+    {{- toYaml $op.alertmanagerConfigSelector | nindent 4 }}
+  {{- end }}
+  {{- if kindIs "map" $op.alertmanagerConfigNamespaceSelector }}
+  alertmanagerConfigNamespaceSelector:
+    {{- toYaml $op.alertmanagerConfigNamespaceSelector | nindent 4 }}
+  {{- end }}
+  {{- with $op.alertmanagerConfigMatcherStrategy }}
+  alertmanagerConfigMatcherStrategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
