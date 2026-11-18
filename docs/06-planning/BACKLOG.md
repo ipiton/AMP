@@ -413,6 +413,7 @@
   - Rate limiting per provider
   - Расширить existing circuit breaker в `infrastructure/llm/`
   - Оценка: ~2d
+- [ ] **LLM-MODEL-CONTRACT-CHECK** — проверка модели на контракт классификации (ADR-021): единое описание шкалы `severity` для всех режимов и повторяемый прогон размеченного набора алертов на целевой модели. Критерии: ответ разбирается, значения в шкале, явно критичный алерт не получает `noise`. Без пройденной проверки `llm.drop_noise` для модели не включается. Сначала `LLM-SEVERITY-SCALE-MISSING-IN-OPENAI-PROMPT`. Оценка: ~0.5–1d.
 
 ## Intelligence — PHASE-6: Investigation Toolset + Runbooks
 
