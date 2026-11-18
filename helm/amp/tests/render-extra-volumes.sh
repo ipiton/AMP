@@ -169,6 +169,14 @@ render_deployment nested "${PIN[@]}" \
   --set-json 'extraVolumeMounts=[{"name":"s","mountPath":"/etc/amp/secrets"}]'
 assert_contains "${WORK_DIR}/nested.yaml" "mountPath: /etc/amp/secrets" "/etc/amp/secrets accepted"
 
+echo "the heartbeat example renders with its URL taken from the Secret"
+HEARTBEAT_VALUES="${CHART_DIR}/../../examples/k8s/heartbeat-values.yaml"
+helm template amp "${CHART_DIR}" "${PIN[@]}" -f "${HEARTBEAT_VALUES}" >"${WORK_DIR}/heartbeat.yaml"
+assert_contains "${WORK_DIR}/heartbeat.yaml" "secretName: amp-notify" "Secret mounted"
+assert_contains "${WORK_DIR}/heartbeat.yaml" "mountPath: /etc/amp/secrets" "mounted at the path url_file uses"
+assert_contains "${WORK_DIR}/heartbeat.yaml" "url_file: /etc/amp/secrets/heartbeat_url" "webhook reads the URL from the file"
+assert_contains "${WORK_DIR}/heartbeat.yaml" "send_resolved: false" "a resolved Watchdog is not a ping"
+
 if [ "${failures}" -ne 0 ]; then
   echo "${failures} assertion(s) failed" >&2
   exit 1

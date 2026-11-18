@@ -280,6 +280,16 @@ alertmanager:
 - After changing the Secret, wait for kubelet to sync the volume (about a minute), then `POST /-/reload` to every pod (authenticated when `webConfig` is enabled) or `kubectl rollout restart statefulset/<fullname>`. Mounts with `subPath` are never updated.
 - The same keys mount a ConfigMap with runbooks or any other file AMP should read.
 
+### Dead Man's Switch (Heartbeat)
+
+Prometheus keeps a `Watchdog` alert firing at all times. Route it to a webhook that pings an external check (healthchecks.io or similar): when Prometheus, AMP or the node dies, the pings stop and the external service raises the alarm. [`examples/k8s/heartbeat-values.yaml`](../../examples/k8s/heartbeat-values.yaml) has the route and the receiver.
+
+- **Give each Alertmanager its own check.** If AMP and another Alertmanager ping the same URL, a live AMP hides the death of the other one. This also applies while they run side by side during a migration.
+- Keep the URL in a Secret and use `url_file`. The file is read on every send, so a new URL takes effect after the kubelet syncs the volume, without a reload.
+- Keep `send_resolved: false`. A resolved `Watchdog` means Prometheus stopped sending it, and that notification would count as a successful ping.
+- The example's timers produce a ping every 3 minutes (480 a day). Use a check period of at least 5 minutes, with a grace time that covers a pod restart.
+- `deploy/e2e-heartbeat/run.sh` checks this setup end to end: the interval, silence while AMP is down, recovery, and silence after `Watchdog` expires.
+
 ### Graceful Shutdown
 
 On termination the pod first runs a preStop `sleep` while Kubernetes removes it from Service endpoints, then `amp-upstream` gets `SIGTERM`: in-flight HTTP requests drain (up to 5s), the core stops and writes its final silence and notification-log snapshots, then AMP's workers stop. Details: `docs/CONFIGURATION_GUIDE.md` → "Graceful Shutdown".
