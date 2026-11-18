@@ -71,6 +71,10 @@ they configured (routes in configFile.content, upstreamCore.config).
 {{- if not (or (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/Alertmanager") (dig "assumeCRDs" false (.Values.monitoring | default dict))) }}
 {{- fail "alertmanager.configSource=operator needs prometheus-operator: the cluster does not serve monitoring.coreos.com/v1 Alertmanager. Install it, or for a render without a cluster pass --api-versions monitoring.coreos.com/v1/Alertmanager or set monitoring.assumeCRDs=true." }}
 {{- end }}
+{{- /* The operator also creates StatefulSet alertmanager-<fullname>: with a long name it fails and the resource stays Reconciled=False. 50 is the longest length verified. */}}
+{{- if gt (len (include "amp.fullname" .)) 50 }}
+{{- fail (printf "alertmanager.configSource=operator (or alertmanager.operator.prepare) needs a release full name of at most 50 characters, got %d: set fullnameOverride." (len (include "amp.fullname" .))) }}
+{{- end }}
 {{- /* Image 0.1.0 has no --web.reload-listen-address and would exit at start. */}}
 {{- if and (include "amp.operatorConfigSource" .) (regexMatch "^v?0\\.1\\.0(@.*)?$" (toString (.Values.image.tag | default .Chart.AppVersion))) }}
 {{- fail "alertmanager.configSource=operator needs an AMP image newer than 0.1.0 (--web.reload-listen-address): set image.tag." }}

@@ -32,7 +32,7 @@ updated_at: 2026-11-18
 
 - [ ] Режим `values` (по умолчанию) рендерится как раньше; новых объектов нет.
 - [ ] Режим `operator` создаёт CR `Alertmanager` с `replicas: 0`, Secret базового конфига, sidecar и init reloader; AMP читает сгенерированный файл.
-- [ ] Рендер падает с понятной ошибкой: нет CRD `Alertmanager`; неизвестный `configSource`; включён publishing discovery; образ AMP `0.1.0` без нового флага.
+- [ ] Рендер падает с понятной ошибкой: нет CRD `Alertmanager`; неизвестный `configSource`; включён publishing discovery; образ AMP `0.1.0` без нового флага; полное имя релиза длиннее 50 символов.
 - [ ] RBAC ServiceAccount AMP не меняется (ADR-012).
 - [ ] Сквозная проверка на k3s: новый AMC доходит до AMP через reload, без рестарта.
 - [ ] ADR-020, README, CHANGELOG, render-тесты; гейты `WORKFLOW.md` пройдены.
