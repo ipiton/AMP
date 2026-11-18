@@ -38,7 +38,7 @@ based_on:
 ## Phase 3: Документация и гейты
 
 - [x] **3.1** ADR-020, README, CHANGELOG, отчёт спайка
-- [ ] **3.2** `scripts/release-gate.sh`, `git diff --check`
+- [x] **3.2** `scripts/release-gate.sh`, `git diff --check`
 
 ## Definition of Done
 

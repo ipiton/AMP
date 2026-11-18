@@ -18,6 +18,11 @@ grep -rn "SLUG" docs/06-planning/DONE.md docs/06-planning/archive/DONE-*.md
 
 ## 2026-11
 
+- 2026-11-18 — (Helm / Alertmanager) **AMCFG-SPIKE, AMCFG-OPERATOR-SOURCE** — вердикт спайка GO; opt-in `alertmanager.configSource: operator` берёт `alertmanager.yml` из prometheus-operator, так что `AlertmanagerConfig` доходит до AMP (ADR-020).
+  - **Механизм:** CR `Alertmanager` с `replicas: 0`, reloader без учётных данных, флаг `--web.reload-listen-address` (только loopback, перезагрузка лишь при изменении файла), `operator.prepare` для двухшагового включения.
+  - **Проверка:** deep-review `gate: pass` (`tasks/archive/AMCFG-OPERATOR-SOURCE/`), `render-operator-source.sh`, `reload_listener_test.go`, `scripts/release-gate.sh` PASS, сквозной прогон на локальном k3s с оператором v0.70 и basic auth: новый AMC активен за 81 с без рестарта.
+  - **Осталось:** `AMCFG-PILOT-CUTOVER`, `AMCFG-RELOADER-METRICS`; режиму нужен образ новее `0.1.0`.
+
 - 2026-11-14 — (Security / Deps) **PROD-DEPS-GO-1274** — Go toolchain `go1.27.3` → `go1.27.4`: закрыта GO-2026-6859 (`net/http`, падение HTTP/1-сервера на гонке заголовков в `MaxBytesReader`), из-за которой `govulncheck` на `main` был красным (run 43636593602). Lightweight, ветка `bugfix/go-1274-govuln`.
   - **Версии:** `toolchain go1.27.4` в `go-app/go.mod` (`go 1.26.0` не тронут), builder — `golang:1.27.4-alpine`, комментарий в `ci.yml`, `docs/CI.md`, пример в TECH-DEBT. Go-код не менялся.
   - **Карантин:** go1.27.4 в `proxy.golang.org` с 2026-11-02 (12 дней) — проходит 7-дневный карантин; тег `golang:1.27.4-alpine` последний раз пересобран 2026-11-10 (штатная пересборка официального образа).
