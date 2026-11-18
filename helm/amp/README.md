@@ -411,6 +411,7 @@ networkPolicy:
 - Senders outside the cluster that come through the Ingress are covered by `ingressController`. Through a LoadBalancer or NodePort they arrive from node or LB addresses: add an `ipBlock`.
 - An ingress controller with `hostNetwork: true` connects from the node IPs, which no `namespaceSelector` matches: list the node CIDR as an `ipBlock` in `ingressController`. Whether an `ipBlock` matches node traffic depends on the CNI (Cilium, for one, classifies it as `host`/`remote-node`, not by CIDR): confirm with the check below.
 - Probes come from the kubelet on the node and are not affected on conformant CNIs. If pods start failing `Readiness probe failed: ... timeout` right after enabling the policy, your CNI filters node traffic: add the node CIDR as an `ipBlock` in `extraIngress`.
+- The policy does not stop traffic from the node itself, so `hostNetwork` pods on the AMP pod's node still connect (seen on k3s with its built-in kube-router controller). Pair the policy with `webConfig.existingSecret`.
 - On a CNI without NetworkPolicy support the object is accepted and does nothing. Check after install, from both sides (`9093` is the default `service.port`; with an `alertmanager.externalURL` path, prefix `/-/healthy` with it; run the first check from a namespace you did not list):
 
   ```bash

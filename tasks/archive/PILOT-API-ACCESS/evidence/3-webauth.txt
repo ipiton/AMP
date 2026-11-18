@@ -1,0 +1,37 @@
+### step 3: basic auth required
+--- POST /api/v2/alerts without credentials (Service / pod)
+  default/probe-default                         000 / 000
+  sema-monitoring/probe-monitoring-unlabeled    000 / 000
+  amp/probe-amp-ns                              000 / 000
+  default/probe-hostnet                         401 / 401
+  sema-monitoring/probe-allowed                 401 / 401
+--- from the allowed pod
+  POST silences, no credentials:   401
+  GET  /metrics, no credentials:   401
+  GET  /-/healthy, no credentials: 200
+  GET  /-/ready, no credentials:   200
+  POST alerts, valid credentials:  200
+  POST alerts, wrong password:     401
+--- AMP pod
+true   0     2026-11-18T08:11:25Z
+--- alerts held by AMP (name, updatedAt)
+  now 2026-11-18T08:13:41Z
+   LabPrometheusAlways 2026-11-18T08:13:18.395Z
+   LabLokiAlways 2026-11-18T08:13:16.467Z
+--- Prometheus
+  up{namespace=amp}:
+    {'instance': '10.42.0.24:9093', 'job': 'amp'} 1
+  notifications sent:
+    {'alertmanager': 'http://10.42.0.8:9093/api/v2/alerts', 'instance': '10.42.0.22:9090', 'job': 'kube-prometheus-stack-prometheus'} 3
+    {'alertmanager': 'http://amp.amp.svc:9093/api/v2/alerts', 'instance': '10.42.0.22:9090', 'job': 'kube-prometheus-stack-prometheus'} 3
+  notification errors:
+    {'alertmanager': 'http://10.42.0.8:9093/api/v2/alerts', 'instance': '10.42.0.22:9090', 'job': 'kube-prometheus-stack-prometheus'} 0
+    {'alertmanager': 'http://amp.amp.svc:9093/api/v2/alerts', 'instance': '10.42.0.22:9090', 'job': 'kube-prometheus-stack-prometheus'} 0
+  notifications dropped:
+    {'instance': '10.42.0.22:9090', 'job': 'kube-prometheus-stack-prometheus'} 0
+--- Loki ruler (per Alertmanager)
+  loki_prometheus_notifications_dropped_total{user="fake"} 0
+  loki_prometheus_notifications_errors_total{alertmanager="http://amp.amp.svc:9093/api/v2/alerts",user="fake"} 0
+  loki_prometheus_notifications_errors_total{alertmanager="http://kube-prometheus-stack-alertmanager.sema-monitoring.svc.cluster.local:9093/api/v2/alert
+  loki_prometheus_notifications_sent_total{alertmanager="http://amp.amp.svc:9093/api/v2/alerts",user="fake"} 4
+  loki_prometheus_notifications_sent_total{alertmanager="http://kube-prometheus-stack-alertmanager.sema-monitoring.svc.cluster.local:9093/api/v2/alerts"

@@ -1,0 +1,33 @@
+### baseline: no policy, no auth
+--- POST /api/v2/alerts without credentials (Service / pod)
+  default/probe-default                         200 / 200
+  sema-monitoring/probe-monitoring-unlabeled    200 / 200
+  amp/probe-amp-ns                              200 / 200
+  default/probe-hostnet                         200 / 200
+  sema-monitoring/probe-allowed                 200 / 200
+--- from the allowed pod
+  POST silences, no credentials:   200
+  GET  /metrics, no credentials:   200
+  GET  /-/healthy, no credentials: 200
+  GET  /-/ready, no credentials:   200
+--- AMP pod
+true   0     2026-11-18T08:07:31Z
+--- alerts held by AMP (name, updatedAt)
+  now 2026-11-18T08:07:59Z
+--- Prometheus
+  up{namespace=amp}:
+    {'instance': '10.42.0.18:9093', 'job': 'amp'} 1
+  notifications sent:
+    {'alertmanager': 'http://10.42.0.8:9093/api/v2/alerts', 'instance': '10.42.0.9:9090', 'job': 'kube-prometheus-stack-prometheus'} 9
+    {'alertmanager': 'http://amp.amp.svc:9093/api/v2/alerts', 'instance': '10.42.0.9:9090', 'job': 'kube-prometheus-stack-prometheus'} 9
+  notification errors:
+    {'alertmanager': 'http://10.42.0.8:9093/api/v2/alerts', 'instance': '10.42.0.9:9090', 'job': 'kube-prometheus-stack-prometheus'} 0
+    {'alertmanager': 'http://amp.amp.svc:9093/api/v2/alerts', 'instance': '10.42.0.9:9090', 'job': 'kube-prometheus-stack-prometheus'} 9
+  notifications dropped:
+    {'instance': '10.42.0.9:9090', 'job': 'kube-prometheus-stack-prometheus'} 0
+--- Loki ruler (per Alertmanager)
+  loki_prometheus_notifications_dropped_total{user="fake"} 0
+  loki_prometheus_notifications_errors_total{alertmanager="http://amp.amp.svc:9093/api/v2/alerts",user="fake"} 7
+  loki_prometheus_notifications_errors_total{alertmanager="http://kube-prometheus-stack-alertmanager.sema-monitoring.svc.cluster.local:9093/api/v2/alert
+  loki_prometheus_notifications_sent_total{alertmanager="http://amp.amp.svc:9093/api/v2/alerts",user="fake"} 7
+  loki_prometheus_notifications_sent_total{alertmanager="http://kube-prometheus-stack-alertmanager.sema-monitoring.svc.cluster.local:9093/api/v2/alerts"

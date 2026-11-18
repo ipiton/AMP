@@ -18,6 +18,9 @@ grep -rn "SLUG" docs/06-planning/DONE.md docs/06-planning/archive/DONE-*.md
 
 ## 2026-11
 
+- 2026-11-18 — (Ops / Pilot) **PILOT-API-ACCESS** — порт 9093 пилота в `sema-prod` закрыт NetworkPolicy, API и `/metrics` требуют basic auth; Prometheus и Loki ruler шлют алерты с кредами (Sema `4cec4497b`). `tasks/archive/PILOT-API-ACCESS/`.
+  - **Проверка:** стенд k3s с kube-router, затем прод: посторонний под 000, без кредов 401, с кредами 200, пробы 200, `up=1`, ошибок отправки Prometheus после рестарта AMP нет.
+  - **Осталось:** `PILOT-API-ACCESS-FOLLOWUPS`.
 - 2026-11-18 — (Helm / Alertmanager) **AMCFG-SPIKE, AMCFG-OPERATOR-SOURCE** — вердикт спайка GO; opt-in `alertmanager.configSource: operator` берёт `alertmanager.yml` из prometheus-operator, так что `AlertmanagerConfig` доходит до AMP (ADR-020).
   - **Механизм:** CR `Alertmanager` с `replicas: 0`, reloader без учётных данных, флаг `--web.reload-listen-address` (только loopback, перезагрузка лишь при изменении файла), `operator.prepare` для двухшагового включения.
   - **Проверка:** deep-review `gate: pass` (`tasks/archive/AMCFG-OPERATOR-SOURCE/`), `render-operator-source.sh`, `reload_listener_test.go`, `scripts/release-gate.sh` PASS, сквозной прогон на локальном k3s с оператором v0.70 и basic auth: новый AMC активен за 81 с без рестарта.

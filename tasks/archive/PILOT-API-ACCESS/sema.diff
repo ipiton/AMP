@@ -1,0 +1,59 @@
+diff -ruN a/infrastructure/helmfile/releases/prometheus-stack-values.prod.yaml b/infrastructure/helmfile/releases/prometheus-stack-values.prod.yaml
+--- a/infrastructure/helmfile/releases/prometheus-stack-values.prod.yaml	2026-11-18 12:16:46.222487602 +0400
++++ b/infrastructure/helmfile/releases/prometheus-stack-values.prod.yaml	2026-11-18 12:16:46.274928666 +0400
+@@ -11,9 +11,17 @@
+     # алерты параллельно основному Alertmanager: решение владельца 2026-11-09, копия
+     # alertmanager.yaml, уведомления в Telegram/Slack дублируются. Не alertingEndpoints:
+     # тот заменил бы основной Alertmanager, а не добавил второй. Откат — удалить блок.
++    # Пароль для AMP: монтируется в /etc/prometheus/secrets/amp-prometheus-auth/.
++    # Secret создать ДО sync (без него под не стартует): ipiton/AMP,
++    # tasks/PILOT-API-ACCESS/create-secrets.sh. AMP без webConfig креды игнорирует.
++    secrets:
++      - amp-prometheus-auth
+     additionalAlertManagerConfigs:
+       - api_version: v2
+         scheme: http
++        basic_auth:
++          username: prometheus
++          password_file: /etc/prometheus/secrets/amp-prometheus-auth/password
+         static_configs:
+           - targets: ["amp.amp.svc:9093"]
+
+diff -ruN a/infrastructure/shared/helm-charts/loki/values.yaml b/infrastructure/shared/helm-charts/loki/values.yaml
+--- a/infrastructure/shared/helm-charts/loki/values.yaml	2026-11-18 12:16:46.227820324 +0400
++++ b/infrastructure/shared/helm-charts/loki/values.yaml	2026-11-18 12:16:46.275367952 +0400
+@@ -308,6 +308,14 @@
+   # Loki talks to Alertmanager v2 API.
+   enable_alertmanager_v2: true
+
++  # Basic auth для AMP. Заголовок уходит на все адреса alertmanager_url, основной
++  # Alertmanager его игнорирует. Файл — base64 от "loki:<пароль>", Secret amp-loki-auth
++  # создать ДО sync (без него под не стартует): ipiton/AMP,
++  # tasks/PILOT-API-ACCESS/create-secrets.sh.
++  alertmanager_client:
++    type: Basic
++    credentials_file: /etc/loki-amp-auth/authorization
++
+   # External URL
+   external_url: http://localhost:3100
+
+@@ -641,12 +649,19 @@
+ volumeMounts:
+   - name: storage
+     mountPath: /loki
++  - name: amp-auth
++    mountPath: /etc/loki-amp-auth
++    readOnly: true
+
+ # Volumes
+ volumes:
+   - name: storage
+     persistentVolumeClaim:
+       claimName: loki-storage
++  - name: amp-auth
++    secret:
++      secretName: amp-loki-auth
++      defaultMode: 0440
+
+ # =============================================================================
+ # Service Configuration

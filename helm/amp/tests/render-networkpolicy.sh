@@ -3,10 +3,11 @@
 # label it selects on, and asserts:
 #   - enabled with no effective source, it refuses to render (it would drop
 #     every alert sender);
-#   - one rule per source role, the `http` port only, no Egress;
-#   - the AMP pods carry app.kubernetes.io/component: application in the pod
-#     template only -- never in the immutable Deployment selector or the
-#     Service selector -- and podLabels cannot override it;
+#   - one rule per source role, the `web` port only, no Egress;
+#   - `web` is a port the StatefulSet's container declares, and the gossip rule
+#     appears only with more than one replica;
+#   - the StatefulSet, its pods and the Service select
+#     app.kubernetes.io/component: application, and podLabels cannot override it;
 #   - the chart's Redis NetworkPolicy admits those pods;
 #   - values without the networkPolicy section (an old release upgraded with
 #     --reuse-values) render no policy instead of crashing.
@@ -161,6 +162,14 @@ assert_contains "${WORK_DIR}/sts-selector.yaml" "${LABEL}" "StatefulSet selector
 doc "${WORK_DIR}/default.yaml" Service amp >"${WORK_DIR}/svc.yaml"
 block "${WORK_DIR}/svc.yaml" "  selector:" >"${WORK_DIR}/svc-selector.yaml"
 assert_contains "${WORK_DIR}/svc-selector.yaml" "${LABEL}" "Service selector: component"
+
+echo "the policy's named port exists on the pod; gossip only with several replicas:"
+assert_contains "${WORK_DIR}/sts.yaml" "- name: web" "container declares the web port"
+assert_absent "${WORK_DIR}/roles-np.yaml" "port: 9094" "one replica: no gossip rule"
+render ha --set networkPolicy.enabled=true "${SENDER[@]}" --set alertmanager.replicas=2
+doc "${WORK_DIR}/ha.yaml" NetworkPolicy amp >"${WORK_DIR}/ha-np.yaml"
+assert_contains "${WORK_DIR}/ha-np.yaml" "# cluster gossip between the AMP pods" "two replicas: gossip rule"
+assert_count "${WORK_DIR}/ha-np.yaml" "port: 9094" 2 "gossip over TCP and UDP"
 
 echo "podLabels cannot override the component label:"
 assert_render_fails "podLabels with app.kubernetes.io/component" \
