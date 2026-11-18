@@ -35,10 +35,15 @@ External URL: {{ include "amp.externalURL" . }}
 {{- else }}
 ℹ️  No HTTP authentication (webConfig.existingSecret)
 {{- end }}
+{{- if include "amp.operatorResources" . }}
 {{- if include "amp.operatorConfigSource" . }}
 ℹ️  alertmanager.yml comes from prometheus-operator: Alertmanager {{ $fullname }} (replicas: 0),
-   Secret alertmanager-{{ $fullname }}-generated. Pods wait for that Secret. If it does not appear:
-   kubectl get alertmanager {{ $fullname }} -n {{ $ns }} -o jsonpath='{.status.conditions}'
+   Secret alertmanager-{{ $fullname }}-generated. Pods wait for that Secret.
+{{- else }}
+ℹ️  alertmanager.operator.prepare: Alertmanager {{ $fullname }} (replicas: 0) is created, AMP still
+   reads alertmanager.config. Check Secret alertmanager-{{ $fullname }}-generated before switching.
+{{- end }}
+   Status: kubectl get alertmanager {{ $fullname }} -n {{ $ns }} -o jsonpath='{.status.conditions}'
 ⚠️  That Secret holds AlertmanagerConfig credentials in plain text: restrict who can read
    Secrets in namespace {{ $ns }}.
 {{- end }}

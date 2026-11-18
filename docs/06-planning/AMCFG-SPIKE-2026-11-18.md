@@ -29,7 +29,10 @@
 | Пути TLS | `/etc/alertmanager/certs/secret_<ns>_<secret>_<key>` | Содержимое — в Secret `alertmanager-<name>-tls-assets-0` |
 | Секреты AMC | **Открытым текстом в `-generated`** | `bot_token`, `routing_key`, `api_url`, `auth_password`, `credentials` |
 | Перезагрузка AMP | **Работает, без рестарта** | Новый AMC активен через 77–81 с (синхронизация Secret'а kubelet'ом); `restartCount` 0, тот же UID пода, `alertmanager_config_last_reload_successful 1` |
-| Авторизация и path prefix | **Работает** | `/-/reload` без пароля — 401; reloader с URL из Secret перезагрузил AMP; пароля нет в логах и спецификации пода |
+| Авторизация и path prefix | **Работает при открытом `/-/reload`** | С `/-/reload` в `unauthenticated_paths`: reload без пароля — 200, `/api/v2/status` и `/metrics` — 401, новый AMC активен без рестарта |
+| Смена базового конфига через `helm upgrade` | **Без рестарта** | Активна через 77 с, тот же UID пода |
+| Откат и двухшаговое включение | **Работают** | `operator` → `values` + `prepare` → `operator`, под готов на каждом шаге |
+| Секреты в `/api/v2/status` | **Замаскированы** | Поддельного токена AMC в ответе нет, есть `<secret>` |
 | Изоляция по namespace | **Работает** | Алерт `namespace=moving` ушёл в receiver AMC, тот же алерт из другого namespace — в корневой |
 
 ## Ограничения, которые надо учитывать
@@ -38,9 +41,10 @@
    - Отклоняются (проверено): `msteamsv2_configs`, `jira_configs`, `rocketchat_configs`, `mattermost_configs`, `incidentio_configs`, Telegram `message_thread_id`, `webhook_url_file` у Discord и MS Teams, Slack `app_token_file` и `timeout`, `global.telegram_bot_token_file`, `name` у `inhibit_rules`, `tracing`.
    - Проходят (проверено): `url_file` у webhook, `routing_key_file`, `api_key_file` у OpsGenie и VictorOps, Slack `api_url_file`, `http_config` с `credentials_file` и TLS-файлами, `time_intervals`, `active_time_intervals`, `mute_time_intervals`, `templates`.
 2. **AMC с ошибкой пропускается** (нет Secret'а, битый CA) с предупреждением в логе оператора; остальные применяются.
-3. **`$(VAR)` раскрывает reloader**; незаданная переменная даёт ошибку и конфиг не обновляется. Так же у основного AM.
-4. **Селекторы:** без `alertmanagerConfigSelector` не выбирается ничего; без `alertmanagerConfigNamespaceSelector` — только свой namespace.
+3. **`$(VAR)` раскрывает reloader из своего окружения.** Поэтому пароль в его env читается автором любого AMC: `$(RELOAD_URL)` в тексте receiver'а попал в итоговый файл (воспроизведено). Незаданная переменная: работающий под сохраняет конфиг, а новый падает в `init-config-reloader` (`CrashLoopBackOff`) и восстанавливается через ~20 с после исправления AMC.
+4. **`--reload-method=signal` с AMP не работает:** reloader требует `/api/v1/status/runtimeinfo` (эндпоинт Prometheus).
+5. **Селекторы:** без `alertmanagerConfigSelector` не выбирается ничего; без `alertmanagerConfigNamespaceSelector` — только свой namespace.
 
 ## Находка: `list secrets` в ns пилота
 
-У пилота `publishing.enabled` по умолчанию `true`, а `publishing.discovery.namespace` пуст, поэтому роль discovery даёт ServiceAccount AMP `list secrets` в `amp`. RBAC не фильтрует `list` по меткам, так что AMP смог бы прочитать `-generated` с токенами AMC. Это шире, чем решил владелец («чтение Secret'ов в ns `amp` держать таким же узким, как в `sema-monitoring`»). Чарт теперь не рендерит такую комбинацию. В `amp` нет Secret'ов с `publishing-target=true`, так что на пилоте достаточно `publishing.enabled: false`.
+У пилота `publishing.enabled` по умолчанию `true`, а `publishing.discovery.namespace` пуст, поэтому роль discovery даёт ServiceAccount AMP `list secrets` в `amp`. RBAC не фильтрует `list` по меткам, так что AMP смог бы прочитать `-generated` с токенами AMC. Это шире, чем решил владелец («чтение Secret'ов в ns `amp` держать таким же узким, как в `sema-monitoring`»). Чарт не рендерит режим `operator` с включённым discovery. В `amp` нет Secret'ов с `publishing-target=true`, так что на пилоте достаточно `publishing.enabled: false`.

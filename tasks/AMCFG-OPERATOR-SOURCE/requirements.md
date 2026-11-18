@@ -32,7 +32,7 @@ updated_at: 2026-11-18
 
 - [ ] Режим `values` (по умолчанию) рендерится как раньше; новых объектов нет.
 - [ ] Режим `operator` создаёт CR `Alertmanager` с `replicas: 0`, Secret базового конфига, sidecar и init reloader; AMP читает сгенерированный файл.
-- [ ] Рендер падает с понятной ошибкой: нет CRD; неизвестный `configSource`; discovery читает Secret'ы того же ns; включена авторизация без URL перезагрузки.
+- [ ] Рендер падает с понятной ошибкой: нет CRD `Alertmanager`; неизвестный `configSource`; включён publishing discovery; включена авторизация, а `/-/reload` не открыт.
 - [ ] RBAC ServiceAccount AMP не меняется (ADR-012).
 - [ ] Сквозная проверка на k3s: новый AMC доходит до AMP через reload, без рестарта.
 - [ ] ADR-020, README, CHANGELOG, render-тесты; гейты `WORKFLOW.md` пройдены.

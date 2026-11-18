@@ -793,13 +793,19 @@ alertmanager:
   #   operator  prometheus-operator merges alertmanager.config with the selected
   #             AlertmanagerConfig resources. The chart creates an Alertmanager
   #             resource with replicas: 0 (no second Alertmanager runs) and
-  #             mounts its generated Secret; a sidecar reloads AMP on changes.
+  #             mounts its generated Secret; a sidecar calls /-/reload on
+  #             changes. Needs publishing.enabled=false, and with HTTP
+  #             authentication /-/reload in server.auth.unauthenticated_paths.
   # Before enabling operator, read "AlertmanagerConfig via prometheus-operator"
   # in the chart README: the operator's model limits alertmanager.config, and
   # the generated Secret holds AlertmanagerConfig credentials in plain text.
   configSource: values
-  # Used with configSource: operator only.
+  # Used with configSource: operator, or with prepare.
   operator:
+    # Create the Alertmanager resource while configSource is still values, to
+    # check its status and generated Secret before switching: the switch drops
+    # the ConfigMap, and pods wait for the Secret.
+    prepare: false
     # spec.version of the Alertmanager resource: the Alertmanager version the
     # operator generates config for. AMP embeds upstream v0.34.1.
     version: v0.34.1
@@ -814,7 +820,8 @@ alertmanager:
     reloader:
       image:
         repository: quay.io/prometheus-operator/prometheus-config-reloader
-        tag: v0.70.0
+        # By digest: this container can read every AlertmanagerConfig credential.
+        tag: v0.70.0@sha256:e20576b76ffd85d2a28d62809092f47b339737320e80646ec6d0e7ac0f4c8e43
         pullPolicy: IfNotPresent
       resources:
         requests:
@@ -823,11 +830,6 @@ alertmanager:
         limits:
           cpu: 100m
           memory: 64Mi
-      # Required with HTTP authentication (webConfig): a Secret key holding
-      # http://<user>:<url-encoded password>@127.0.0.1:9093<path prefix>/-/reload
-      reloadURLSecret:
-        name: ""
-        key: ""
   # Merged over the AMP configuration the chart generates from profile,
   # environment, database, llm, investigation and publishing
   # (<fullname>-amp-config, --amp.config.file), e.g.

@@ -48,13 +48,14 @@ based_on:
 
 ## Target Design
 
-Values: `alertmanager.configSource` (`values` | `operator`), `alertmanager.operator.{version, alertmanagerConfigSelector, alertmanagerConfigNamespaceSelector, alertmanagerConfigMatcherStrategy, reloader}`.
+Values: `alertmanager.configSource` (`values` | `operator`), `alertmanager.operator.{prepare, version, alertmanagerConfigSelector, alertmanagerConfigNamespaceSelector, alertmanagerConfigMatcherStrategy, reloader}`.
 
 Режим `operator`:
 
 - Secret `<fullname>-operator-base` (`alertmanager.yaml` из `alertmanager.config`) и CR `Alertmanager` `<fullname>` с `replicas: 0`;
 - ConfigMap `<fullname>` не рендерится, `--config.file=/etc/alertmanager/config_out/alertmanager.env.yaml`;
-- init-контейнер `init-config-reloader` и sidecar `config-reloader`; смена конфига не перезапускает под.
+- init-контейнер `init-config-reloader` и sidecar `config-reloader`; смена конфига не перезапускает под;
+- `prepare: true` создаёт CR и Secret при `configSource: values`: двухшаговое переключение.
 
 ## API Contracts
 
@@ -71,10 +72,11 @@ Values: `alertmanager.configSource` (`values` | `operator`), `alertmanager.opera
 ## Security Design
 
 - SA AMP новых прав не получает; Secret монтируется kubelet'ом.
-- `-generated` содержит токены AMC открытым текстом (принято владельцем). Поэтому рендер запрещает discovery в ns релиза: `list secrets` прочитал бы этот Secret.
+- `-generated` содержит токены AMC открытым текстом (принято владельцем). Поэтому рендер запрещает publishing discovery в этом режиме: `list secrets` прочитал бы Secret, а токен SA уровня пода попал бы и в reloader.
 - Распакованный файл — в `emptyDir` `medium: Memory`. `-generated` монтируется только в reloader-контейнеры.
 - По умолчанию AMC берутся только из ns релиза; все ns — явным `{}`.
-- URL перезагрузки с паролем — из Secret через env, в спецификации пода не виден.
+- Reloader не получает учётных данных: `$(VAR)` в AMC раскрывается из его окружения. При авторизации рендер требует явного `/-/reload` в `unauthenticated_paths`.
+- Образ reloader закреплён по digest.
 
 ## Invariants
 
@@ -86,7 +88,7 @@ Values: `alertmanager.configSource` (`values` | `operator`), `alertmanager.opera
 - Неподдерживаемое поле в базовом конфиге: `Reconciled=False`, прошлый `-generated` действует; при первой установке под ждёт Secret.
 - AMC с ошибкой: оператор пропускает только его.
 - TLS-материала больше одного шарда: монтируется только `-tls-assets-0` (ограничение, README).
-- `$(VAR)` в шаблонах проходит envsubst, как у основного Alertmanager.
+- `$(UNSET)` в AMC: работающий под сохраняет конфиг, новый падает в `init-config-reloader` до исправления AMC (проверено), как у основного Alertmanager.
 
 ## Impact Analysis
 
@@ -94,11 +96,11 @@ Values: `alertmanager.configSource` (`values` | `operator`), `alertmanager.opera
 
 ## Rollout / Rollback
 
-Включение и откат — сменой `configSource` и `helm upgrade`; смена режима перезапускает поды.
+Включение: `prepare: true`, проверка `Reconciled=True`, затем `configSource: operator`. Откат — обратно на `values`. Смена режима перезапускает поды.
 
 ## Observability
 
-`alertmanager_config_last_reload_successful` у AMP, `status.conditions` CR, логи `config-reloader`.
+`alertmanager_config_last_reload_successful` у AMP, `status.conditions` CR, логи `config-reloader`. Метрики reloader не собираются (follow-up `AMCFG-RELOADER-METRICS`).
 
 ## Deep Review
 

@@ -110,14 +110,12 @@ spec:
       {{- $reloader = .Values.alertmanager.operator.reloader }}
       {{- $reloaderArgs = list (printf "--config-file=%s/alertmanager.yaml.gz" $operatorDir) (printf "--config-envsubst-file=%s" $operatorConfigFile) (printf "--watched-dir=%s" $operatorDir) "--listen-address=" }}
       {{- end }}
-      {{- if or $operatorSource $waitForPostgres }}
-      initContainers:
-      {{- end }}
       {{- if $operatorSource }}
+      initContainers:
         # Renders the config before AMP starts, as the operator's own init-config-reloader.
         - name: init-config-reloader
           image: "{{ $reloader.image.repository }}:{{ $reloader.image.tag }}"
-          imagePullPolicy: {{ $reloader.image.pullPolicy }}
+          imagePullPolicy: {{ $reloader.image.pullPolicy | default "IfNotPresent" }}
           args:
             - --watch-interval=0
             {{- toYaml $reloaderArgs | nindent 12 }}
@@ -144,6 +142,9 @@ spec:
       # on a fresh install the bundled one is still pulling its image or running
       # initdb, and AMP would run without history until restarted. Wait for it,
       # but at most 120s: alert delivery must not depend on the database.
+      {{- if not $operatorSource }}
+      initContainers:
+      {{- end }}
         - name: wait-for-postgres
           image: postgres:16.15
           imagePullPolicy: IfNotPresent
@@ -285,15 +286,13 @@ spec:
             {{- end }}
         {{- if $operatorSource }}
         # Unpacks the operator's Secret and calls /-/reload when it changes.
+        # Never give this container a credential: $(VAR) in any
+        # AlertmanagerConfig expands from its environment (ADR-020).
         - name: config-reloader
           image: "{{ $reloader.image.repository }}:{{ $reloader.image.tag }}"
-          imagePullPolicy: {{ $reloader.image.pullPolicy }}
+          imagePullPolicy: {{ $reloader.image.pullPolicy | default "IfNotPresent" }}
           args:
-            {{- if $reloader.reloadURLSecret.name }}
-            - --reload-url=$(RELOAD_URL)
-            {{- else }}
             - --reload-url=http://127.0.0.1:9093{{ $prefix }}/-/reload
-            {{- end }}
             {{- toYaml $reloaderArgs | nindent 12 }}
           env:
             - name: POD_NAME
@@ -302,13 +301,6 @@ spec:
                   fieldPath: metadata.name
             - name: SHARD
               value: "-1"
-            {{- if $reloader.reloadURLSecret.name }}
-            - name: RELOAD_URL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ $reloader.reloadURLSecret.name | quote }}
-                  key: {{ $reloader.reloadURLSecret.key | quote }}
-            {{- end }}
           resources:
             {{- toYaml $reloader.resources | nindent 12 }}
           securityContext:

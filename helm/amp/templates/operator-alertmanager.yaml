@@ -5,7 +5,7 @@ config with the selected AlertmanagerConfig resources into Secret
 alertmanager-<fullname>-generated. replicas: 0, so it runs no Alertmanager of its
 own; the AMP pods mount that Secret.
 */}}
-{{- if include "amp.operatorConfigSource" . }}
+{{- if include "amp.operatorResources" . }}
 {{- $fullname := include "amp.fullname" . }}
 {{- $ns := include "amp.namespace" . }}
 {{- $op := .Values.alertmanager.operator }}

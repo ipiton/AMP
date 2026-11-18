@@ -63,26 +63,31 @@ they configured (routes in configFile.content, upstreamCore.config).
 {{- if not (has $source (list "values" "operator")) }}
 {{- fail (printf "alertmanager.configSource must be values or operator, got %q." $source) }}
 {{- end }}
-{{- if eq $source "operator" }}
+{{- if include "amp.operatorResources" . }}
 {{- $op := $am.operator | default dict }}
-{{- if not (kindIs "map" (dig "reloader" "image" nil $op)) }}
-{{- fail "alertmanager.configSource=operator needs alertmanager.operator.reloader.image: with helm upgrade use --reset-then-reuse-values (Helm >= 3.14) or a values file for this chart, not --reuse-values." }}
+{{- if not (and (dig "reloader" "image" "repository" "" $op) (dig "reloader" "image" "tag" "" $op)) }}
+{{- fail "alertmanager.configSource=operator needs alertmanager.operator.reloader.image.repository and .tag: with helm upgrade use --reset-then-reuse-values (Helm >= 3.14) or a values file for this chart, not --reuse-values." }}
 {{- end }}
-{{- if not (include "amp.monitoringCRDs" .) }}
-{{- fail "alertmanager.configSource=operator needs prometheus-operator: the cluster does not serve monitoring.coreos.com/v1. Install it, or for a render without a cluster pass --api-versions monitoring.coreos.com/v1 or set monitoring.assumeCRDs=true." }}
+{{- if not (or (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/Alertmanager") (dig "assumeCRDs" false (.Values.monitoring | default dict))) }}
+{{- fail "alertmanager.configSource=operator needs prometheus-operator: the cluster does not serve monitoring.coreos.com/v1 Alertmanager. Install it, or for a render without a cluster pass --api-versions monitoring.coreos.com/v1/Alertmanager or set monitoring.assumeCRDs=true." }}
 {{- end }}
-{{- /* RBAC cannot filter `list` by label: the discovery Role would read the generated Secret with the tokens of every selected AlertmanagerConfig (ADR-012, ADR-020). */}}
-{{- $releaseNamespace := include "amp.namespace" . }}
-{{- if and (include "amp.discoveryEnabled" .) (eq (.Values.publishing.discovery.namespace | default $releaseNamespace) $releaseNamespace) }}
-{{- fail (printf "alertmanager.configSource=operator puts AlertmanagerConfig credentials into a Secret of namespace %s, and publishing target discovery lists every Secret there. Set publishing.discovery.namespace to another namespace, or publishing.enabled=false." $releaseNamespace) }}
+{{- /* The generated Secret holds AlertmanagerConfig credentials. RBAC cannot filter `list` by label, and a token mounted at pod level would also reach the reloader container (ADR-012, ADR-020). */}}
+{{- if include "amp.discoveryEnabled" . }}
+{{- fail "alertmanager.configSource=operator (or alertmanager.operator.prepare) cannot be combined with publishing target discovery: the generated Secret holds AlertmanagerConfig credentials, and the pod must not carry a Kubernetes API token. Set publishing.enabled=false." }}
 {{- end }}
-{{- $reloadURL := dig "reloader" "reloadURLSecret" dict $op }}
-{{- if and $reloadURL.name (not $reloadURL.key) }}
-{{- fail "alertmanager.operator.reloader.reloadURLSecret.key is required with reloadURLSecret.name." }}
+{{- if include "amp.operatorConfigSource" . }}
+{{- /* The reloader holds no credential ($(VAR) in an AlertmanagerConfig would read it), so with authentication /-/reload has to be open. */}}
+{{- $ampConfig := $am.ampConfig | default dict }}
+{{- $auth := or .Values.webConfig.existingSecret (dig "server" "web_config_file" "" $ampConfig) }}
+{{- range $am.extraArgs | default list }}
+{{- if hasPrefix "--web.config.file" (toString .) }}{{- $auth = true }}{{- end }}
 {{- end }}
-{{- $webConfigFile := or .Values.webConfig.existingSecret (dig "server" "web_config_file" "" ($am.ampConfig | default dict)) }}
-{{- if and $webConfigFile (not $reloadURL.name) }}
-{{- fail "HTTP authentication is on, so the config reloader cannot call /-/reload: set alertmanager.operator.reloader.reloadURLSecret to a Secret key holding http://<user>:<url-encoded password>@127.0.0.1:9093<path prefix>/-/reload." }}
+{{- range .Values.extraEnv | default list }}
+{{- if eq (toString .name) "SERVER_WEB_CONFIG_FILE" }}{{- $auth = true }}{{- end }}
+{{- end }}
+{{- if and $auth (not (has "/-/reload" (dig "server" "auth" "unauthenticated_paths" list $ampConfig))) }}
+{{- fail "HTTP authentication is on, and the config reloader carries no credentials: add /-/reload to alertmanager.ampConfig.server.auth.unauthenticated_paths, keeping /-/healthy and /-/ready. See \"AlertmanagerConfig via prometheus-operator\" in the chart README." }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- end }}

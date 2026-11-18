@@ -376,3 +376,25 @@
 - **PoC пройден** (владелец, 2026-10-24): вердикт `UPSTREAM-CORE-POC-GATE` принят — сьюты на upstream-ядре расходятся только AMP-only поверхностью, форматом ошибок и деталями своего ядра, разрывов доставки нет (`tasks/archive/UPSTREAM-CORE-POC-GATE/divergences.md`). Эпик продолжается, срезы 2–4 свободны.
 - **`/debug/*` — как upstream** (владелец, 2026-10-24): pprof и `expvar` (`/debug/vars`: `cmdline`, `memstats`) на основном порту, без своего вырезания и флага. Прежнее решение AMP убрать `/debug` отменено; ограничение доступа — сетью (порт не публикуется наружу), как у upstream Alertmanager. В migration notes среза 7 — с предупреждением: `cmdline` виден всем, кто достаёт до порта, секреты во флагах не передавать.
 - **Уточнение API среза 6** (`UPSTREAM-API-UI`, 2026-11-08): «AMP-маршруты отдельно» значит отдельно от `/api/v2`: AMP не добавляет маршрутов в namespace upstream, свои маршруты живут под `<prefix>/api/amp/v1/`, за той же auth. Поэтому `/api/v2/inhibitions`, перечисленный в решении среди AMP-маршрутов, удалён: данные есть в `status.inhibitedBy` у `GET /api/v2/alerts` и в `config.original` у `GET /api/v2/status`. По той же причине не возвращаются `?group_by=`, `?status=resolved` и health-алиасы. История и investigation ищутся по FNV-fingerprint из `api/v2` (колонка `alerts.upstream_fingerprint`) или по SHA-256 AMP. В v0.1.0 только API, UI — `UPSTREAM-UI` (владелец, 2026-11-08). Удаление inhibitions и прочих AMP-расширений принято автором среза по инварианту «`api/v2` = upstream» и подтверждено владельцем 2026-11-08 при мерже среза.
+
+## ADR-020: `AlertmanagerConfig` в AMP — конфиг генерирует prometheus-operator
+- **Дата**: 2026-11-18
+- **Контекст**: AMP читает один `alertmanager.yml` (ADR-019), а команды описывают маршруты через `AlertmanagerConfig`. Это блокер замены основного Alertmanager. Варианты — `AMCFG-RESEARCH-2026-11-14.md`, проверка — `AMCFG-SPIKE-2026-11-18.md`.
+- **Решение** (владелец, 2026-11-14; вердикт спайка go):
+  - opt-in `alertmanager.configSource: operator`: чарт создаёт CR `Alertmanager` с `replicas: 0` и Secret базового конфига, под AMP читает `alertmanager-<fullname>-generated` через init-контейнер и sidecar `prometheus-config-reloader`; Go-кода и новых прав ServiceAccount нет;
+  - `alertmanager.operator.prepare` создаёт CR до переключения: режим меняется в два шага, после проверки `Reconciled=True`;
+  - по умолчанию AMC берутся только из namespace релиза, все namespace — явным `{}`.
+- **Безопасность**:
+  - `-generated` содержит токены AMC открытым текстом (принято владельцем, как в `sema-monitoring`). Режим несовместим с publishing discovery: `list secrets` (ADR-012) прочитал бы этот Secret, а токен SA уровня пода попал бы в reloader;
+  - reloader не получает учётных данных: `$(VAR)` в любом AMC раскрывается из его окружения. При HTTP-авторизации рендер требует явно добавить `/-/reload` в `server.auth.unauthenticated_paths`; перезагрузка только перечитывает смонтированный файл, остальные пути остаются закрытыми;
+  - распакованный конфиг лежит в `emptyDir` `medium: Memory`, `-generated` смонтирован только в контейнеры reloader, образ закреплён по digest.
+- **Отклонено**:
+  - URL `/-/reload` с паролем из Secret: воспроизведена утечка через `$(RELOAD_URL)` в AMC;
+  - `--reload-method=signal`: требует `/api/v1/status/runtimeinfo` Prometheus;
+  - исключение авторизации для loopback в Go: новый контракт ради одного пути; вернуться, если открытый `/-/reload` окажется неприемлем;
+  - свой контроллер и AMP как образ CR: см. решения владельца в research.
+- **Следствие**:
+  - базовый конфиг ограничен строгой моделью оператора: неподдерживаемое поле отклоняет его целиком, действует прошлый `-generated`;
+  - режим работает только при наличии prometheus-operator; без него маршруты по-прежнему пишутся в `alertmanager.config`;
+  - `$(UNSET)` в выбранном AMC не даст стартовать новому поду до исправления AMC, поэтому выбирать надо namespace с доверенными авторами;
+  - метрики reloader не собираются: `AMCFG-RELOADER-METRICS`.

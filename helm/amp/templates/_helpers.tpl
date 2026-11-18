@@ -193,6 +193,14 @@ app.kubernetes.io/component: application
 {{- end }}
 
 {{/*
+"true" when the chart creates the Alertmanager resource: configSource=operator,
+or alertmanager.operator.prepare ahead of switching to it.
+*/}}
+{{- define "amp.operatorResources" -}}
+{{- if or (include "amp.operatorConfigSource" .) (dig "prepare" false (.Values.alertmanager.operator | default dict)) }}true{{ end }}
+{{- end }}
+
+{{/*
 "true" when prometheus-operator objects (ServiceMonitor, PrometheusRule) can be
 applied: the cluster serves monitoring.coreos.com/v1, or monitoring.assumeCRDs
 says so for a render without a cluster (helm template without --api-versions).
