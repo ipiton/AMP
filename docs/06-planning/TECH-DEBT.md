@@ -25,6 +25,13 @@
 
 ## Medium
 
+### [medium][Ops][~0.5d] PILOT-API-ACCESS-FOLLOWUPS
+- **Title:** остаток после закрытия API пилота в `sema-prod`
+- **Problem:** пять Secret'ов с кредами есть только в кластере, без SOPS. Реальная отправка алерта от Loki ruler с кредами на проде не наблюдалась: после рестарта `loki-0` правила не срабатывали. Grafana и `ml-service` не имеют доступа к AMP, а `ml-service` не умеет basic auth и его egress не пускает на 9093.
+- **Impact:** при пересоздании кластера креды придётся выпускать заново; при замене основного Alertmanager эти два клиента перестанут работать.
+- **Fix:** перенести Secret'ы в SOPS; на первом алерте Loki проверить `loki_prometheus_notifications_errors_total`; до замены основного AM добавить Grafana и `ml-service` в `networkPolicy.alertSenders` и выдать им пользователей.
+- **Refs:** `tasks/archive/PILOT-API-ACCESS/ROLLOUT.md`.
+
 ### [medium][Helm][~2d] HELM-CHART-GAPS
 - **Title:** расхождения шаблонов чарта с values
 - **Problem:** найдено при аудите `values-production.yaml` (INF-B, 2026-08-20), не исправлено (слишком большой темплейт-скоуп для values-аудита). _(Сверено с кодом 2026-11-08 после UPSTREAM-CORE-REMOVAL: `cache.*` удалён, чарт — один StatefulSet `amp-upstream`, Service выбирает поды по `amp.appSelectorLabels`. Сняты как устаревшие: `migration.backupBeforeMigration` (ключа нет), R24 и пункт PG-CONFIG-FIX про селектор Service (port-forward `svc/<fullname>` из `NOTES.txt` попадает в под AMP), пункты AMP-CACHE-NOAUTH A3/B5 про расхождение пароля Valkey у AMP — AMP к Valkey не подключается; вернутся вместе с `UPSTREAM-AI-HA-DEDUP`.)_

@@ -31,7 +31,7 @@
 Рабочий каталог: корень репозитория AMP на коммите этой ветки.
 
 ```bash
-export CTX=sema-prod TASK=$PWD/tasks/PILOT-API-ACCESS
+export CTX=sema-prod TASK=$PWD/tasks/archive/PILOT-API-ACCESS
 ```
 
 Убедиться, что релиз не менялся и шаг 1 добавляет только NetworkPolicy. Команда ничего не применяет, значения Secret'ов `kubectl diff` скрывает. Ожидается один объект: `NetworkPolicy.amp.amp`.
