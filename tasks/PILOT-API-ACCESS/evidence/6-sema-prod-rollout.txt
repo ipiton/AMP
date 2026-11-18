@@ -1,0 +1,41 @@
+### sema-prod rollout, 2026-11-18 (times +04). AMP chart from e872bb8.
+### Sema change: branch feature/amp-pilot-api-access, commit 953ebe339.
+
+preflight: diff = NetworkPolicy.amp.amp only; no auth Secrets existed
+
+step 1, 12:30:45, amp revision 5
+  outsider from default: 000; Prometheus -> /-/healthy: OK; amp-0 not restarted
+  after 3m: up=1, Prometheus errors to AMP and main AM = 0, dropped = 0
+
+step 2: 5 Secrets created by create-secrets.sh
+
+step 3
+  helmfile diff: only Prometheus (secrets), its am-confg Secret, Loki StatefulSet and ConfigMap
+  kube-prometheus-stack revision 20: password_file in the running config;
+    after 3m: errors 0, sent to AMP and main AM 39.6 each
+  loki revision 24: loki-0 ready, no error or warning about credentials in the log
+
+step 4, amp revision 6: diff = ServiceMonitor only; scrape job has basic_auth; up=1
+
+step 5, 12:46:08, amp revision 7: diff = StatefulSet only; rollout finished 12:46:43
+  log: HTTP authentication enabled, users=3, unauthenticated /-/healthy, /-/ready
+  from the Prometheus pod:
+    no credentials  /api/v2/status 401
+    no credentials  /metrics       401
+    no credentials  /-/healthy     200
+    no credentials  /-/ready       200
+    wrong password  /api/v2/status 401
+    prometheus      /api/v2/status 200
+    loki            /api/v2/status 200 (value of amp-loki-auth)
+    metrics scrape  /metrics       200
+    operator        /api/v2/status 200
+
+final, 12:50-12:51
+  last 3m: up=1, Prometheus errors 0 to both, sent 26.4 to each, dropped 0
+  last 10m: about 3 Prometheus errors to AMP (restart window), 0 to the main AM
+  AMP holds 17 alerts, latest updatedAt 08:49:39Z
+  history table: 18 rows updated after the restart, latest 08:51:06Z
+  outsider from default: 000
+
+not observed: a real Loki ruler notification. No Loki alert fired after loki-0
+restarted (sent counters 0 for both Alertmanagers, errors 0).
