@@ -32,7 +32,7 @@ based_on:
 
 ## Phase 2: Ревью и тесты
 
-- [ ] **2.1** deep-review, `review-verdict.json` с `gate: pass`
+- [x] **2.1** deep-review, `review-verdict.json` с `gate: pass`
 - [ ] **2.2** `render-operator-source.sh` <!-- depends: 2.1 | verify: скрипт зелёный -->
 
 ## Phase 3: Документация и гейты

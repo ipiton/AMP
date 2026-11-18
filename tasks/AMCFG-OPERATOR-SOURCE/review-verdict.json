@@ -1,0 +1,17 @@
+{
+  "gate": "pass",
+  "reason": null,
+  "branch": "claude/amcfg-operator-source-b26de5",
+  "commit": "29af20d",
+  "reviewed_at": "2026-11-18",
+  "findings": {
+    "blocker": 2,
+    "major": 9,
+    "minor": 11,
+    "nit": 10
+  },
+  "open": {
+    "blocker": 0,
+    "major_without_disposition": 0
+  }
+}
