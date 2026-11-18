@@ -19,7 +19,7 @@ grep -rn "SLUG" docs/06-planning/DONE.md docs/06-planning/archive/DONE-*.md
 ## 2026-11
 
 - 2026-11-18 — (Ops) **AMP-PILOT-WEEK-REVIEW** — итоги пилота в `sema-prod`, отчёт `PILOT-REVIEW-2026-11-18.md`. За 93,6 ч после rev 3: Slack 15/15, Telegram 100/101, 0 ошибок отправки, 0 рестартов, активные алерты 20/20.
-  - **Решение владельца:** вариант (б), AMP принимает алерты и пишет историю, уведомления не отправляет. Helm rev 4: у receiver'ов убраны интеграции, маршруты сохранены. Откат — `helm rollback amp 3 -n amp --kube-context sema-prod`.
+  - **Решение владельца:** вариант (б), AMP принимает алерты и пишет историю, уведомления не отправляет. Helm rev 4: у receiver'ов убраны интеграции, маршруты сохранены. Возврат рассылки — `helm upgrade` с интеграциями в текущих values. `helm rollback amp 3` не использовать: он снимет NetworkPolicy и basic auth из rev 5–7.
   - **Проверка:** server-side dry-run показал изменение только `alertmanager.yml` и checksum; после выкатки в живом конфиге нет интеграций, счётчики Slack/Telegram AMP равны 0.
 
 - 2026-11-14 — (Security / Deps) **PROD-DEPS-GO-1274** — Go toolchain `go1.27.3` → `go1.27.4`: закрыта GO-2026-6859 (`net/http`, падение HTTP/1-сервера на гонке заголовков в `MaxBytesReader`), из-за которой `govulncheck` на `main` был красным (run 43636593602). Lightweight, ветка `bugfix/go-1274-govuln`.
