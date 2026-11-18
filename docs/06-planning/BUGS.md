@@ -17,6 +17,15 @@
 - **Refs:** найдено при HELM-VCT-CHART-LABELS (2026-10-22), `tasks/archive/HELM-VCT-CHART-LABELS/evidence/release-gate.txt`. Блокирует Owner `MAIN-BRANCH-PROTECTION` (ждёт зелёного CI на `main`). Смежно `QUALITY-GATES-ALIGN`.
 - **Status:** open
 
+### [medium][AI][~0.25d] LLM-SEVERITY-SCALE-MISSING-IN-OPENAI-PROMPT
+- **Title:** в OpenAI-режиме модель не получает значения шкалы `severity`, а ответ `1` трактуется как `noise`
+- **Problem:** `go-app/internal/infrastructure/llm/client.go:426-432` (`classifyAlertOpenAI`) просит только `severity (1-4)`; в данных алерта (`alertDataBlock`) шкалы тоже нет. Расшифровка `1=noise, 2=info, 3=warning, 4=critical` есть только в proxy-режиме (`client.go:324`), а общий `mapper.go:62,82-92` применяет её к обоим ответам. При `llm.drop_noise` алерт с `SeverityNoise` не попадает в уведомление независимо от `confidence` (`upstreamai/stage.go:39`). Не воспроизводилось: найдено чтением кода. Гипотеза: в привычной нумерации SEV1/P1 единица означает самый серьёзный уровень, и модель может выдать `1` для критичного алерта.
+- **Impact:** при `llm.enabled` и `provider: openai` / `openai-compatible` возможны неверные `llm_severity` в уведомлениях. При включённом `drop_noise` (по умолчанию `false`) возможна потеря критичного уведомления. В материалах пилота включение LLM-классификации упомянуто как возможная цель (`PILOT-REVIEW-2026-11-18.md`), поэтому проверить это нужно до включения.
+- **Fix:** передать в OpenAI-запрос шкалу с определением `noise` (одна формулировка для обоих режимов); тест на содержимое запроса. Прогнать набор размеченных алертов на целевой модели и сравнить `severity`. Для `drop_noise` решить отдельно: нужен ли порог `confidence` и теневой прогон на истории перед включением.
+- **Verify:** тест падает без шкалы в system prompt; на наборе с явно критичными алертами ни один не получает `noise`.
+- **Refs:** Sema `docs/06-planning/article-reviews/2026-11-18.md` § [1] П2; `go-app/internal/infrastructure/llm/{client.go,mapper.go,chat.go}`; `go-app/internal/upstreamai/stage.go`; `helm/amp/values.yaml:504`; `config.yaml.example:86`.
+- **Status:** open
+
 ### [medium][Helm][~0.25d] ESO-SECRET-OWNERSHIP-CONFLICT
 - **Title:** при `externalSecrets.enabled` Helm и External Secrets Operator претендуют на один Secret
 - **Problem:** `helm/amp/templates/secret.yaml` рендерит `<fullname>-secrets` безусловно, а `templates/externalsecret.yaml` при `externalSecrets.enabled` целится в тот же Secret (`target.name: <fullname>-secrets`, `creationPolicy: Owner`). Ожидаемо: ESO перезаписывает данные, Helm на `upgrade` возвращает свои (в том числе пустые ключи), владелец объекта неоднозначен.
