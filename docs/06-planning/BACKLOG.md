@@ -13,8 +13,8 @@
 
 ### P1 — первое реальное внедрение и заявление «замена Alertmanager»
 
-- [ ] **AMP-PG-BACKUP-ROLLOUT** — выкатить бэкап встроенного PostgreSQL пилота: релиз `pg-backup` из Sema, отдельный бакет R2, еженедельная проверка восстановления. Вариант выбран владельцем 2026-11-18, выкатка ждёт его подтверждения. `Waiting-on: владелец (бакет и токены R2, деплой)`.
-  - _Реализация: ветка Sema `feature/amp-pg-backup-r2`, шаги — её `tasks/amp-pg-backup-r2/Spec.md`; решение — `tasks/AMP-PG-OPS/backup-options.md`. Настоящий R2 и `sema-prod` не проверялись._
+- [x] **AMP-PG-BACKUP-ROLLOUT** _(выкачено 2026-11-18)_ — бэкап встроенного PostgreSQL пилота: релиз `pg-backup` из Sema в ns `amp`, отдельный бакет R2 `amp-pg-backup-prod`, еженедельная проверка восстановления, алерты. Ручные дамп и восстановление на проде прошли.
+  - _Реализация: Sema `main` (`598c42940`), `tasks/archive/amp-pg-backup-r2/Spec.md`; решение — `tasks/AMP-PG-OPS/backup-options.md`._
 
 - [ ] **K8S-LIVE-ROLLOUT-CHECK** — проверить на живом кластере (kind/k3d) то, что после PROD-GRACEFUL-SHUTDOWN проверено только рендером и тестами в процессе. Rolling update AMP под непрерывным `POST /api/v2/alerts` должен пройти без 5xx и без потерянных алертов. Для этого нужно, чтобы kubelet снимал endpoint'ы параллельно с preStop `sleep` (premise `assumed` в `tasks/archive/PROD-GRACEFUL-SHUTDOWN/Spec.md`). Заодно — непроверенное вживую из PROD-INGRESS-HARDENING: kubelet probes через NetworkPolicy, реальное отсечение трафика политикой. Сделать: сценарий (скрипт в `deploy/`, по образцу `e2e-ha`) с kind, нагрузкой и подсчётом ответов, прогон, вывод в `docs/CI.md` — включать ли в CI. Оценка ~1d. _(2026-11-08, `UPSTREAM-CORE-REMOVAL`: shutdown `cmd/server` из PROD-GRACEFUL-SHUTDOWN удалён вместе с ним; workload — StatefulSet `<fullname>` на `amp-upstream`, preStop и `gracefulShutdown.*` в чарте остались. При `alertmanager.replicas` > 1 Prometheus шлёт в каждый под, поэтому сценарий — rolling update StatefulSet с нагрузкой на все поды; порядок shutdown `amp-upstream` проверить заново, а не переносить из PROD-GRACEFUL-SHUTDOWN.)_
   - _Источник: PROD-GRACEFUL-SHUTDOWN (2026-10-06)._
